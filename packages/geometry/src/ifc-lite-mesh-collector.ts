@@ -132,25 +132,14 @@ export class IfcLiteMeshCollector {
           colorArray[3],
         ];
 
-        // Capture arrays once (WASM creates new copies on each access)
-        const positions = mesh.positions;
-        const normals = mesh.normals;
-        const indices = mesh.indices;
-
-        // Convert IFC Z-up to WebGL Y-up (modify captured arrays)
-        this.convertZUpToYUp(positions);
-        this.convertZUpToYUp(normals);
-
-        // Reverse winding order to compensate for handedness flip from Y negation
-        // Without this, triangles face the wrong way and get backface-culled
-        this.reverseWindingOrder(indices);
-
+        // Z-up→Y-up conversion and winding order reversal are now done
+        // in Rust (MeshDataJs::new) for performance.
         meshes.push({
           expressId: mesh.expressId,
           ifcType: mesh.ifcType,
-          positions,
-          normals,
-          indices,
+          positions: mesh.positions,
+          normals: mesh.normals,
+          indices: mesh.indices,
           color,
         });
 
@@ -260,24 +249,14 @@ export class IfcLiteMeshCollector {
               mesh.color[3],
             ];
 
-            // Capture arrays once
-            const positions = mesh.positions;
-            const normals = mesh.normals;
-            const indices = mesh.indices;
-
-            // Convert IFC Z-up to WebGL Y-up
-            this.convertZUpToYUp(positions);
-            this.convertZUpToYUp(normals);
-
-            // Reverse winding order to compensate for handedness flip from Y negation
-            this.reverseWindingOrder(indices);
-
+            // Capture arrays once — Z-up→Y-up conversion and winding order
+            // reversal are now done in Rust (MeshDataJs::new) for performance.
             convertedBatch.push({
               expressId,
               ifcType: mesh.ifcType,
-              positions,
-              normals,
-              indices,
+              positions: mesh.positions,
+              normals: mesh.normals,
+              indices: mesh.indices,
               color,
             });
 
@@ -340,9 +319,11 @@ export class IfcLiteMeshCollector {
     });
 
     // Yield batches as they become available
+    let yieldedBatchCount = 0;
     while (true) {
       // Yield any queued batches
       while (batchQueue.length > 0) {
+        yieldedBatchCount++;
         yield batchQueue.shift()!;
       }
 
@@ -360,6 +341,17 @@ export class IfcLiteMeshCollector {
       await new Promise<void>((resolve) => {
         resolveWaiting = resolve;
       });
+    }
+
+    // Warn if WASM returned 0 results for a non-trivially-sized file
+    // This typically indicates WASM ran out of memory during parsing
+    if (yieldedBatchCount === 0 && this.content.length > 1000) {
+      const sizeMB = (this.content.length / (1024 * 1024)).toFixed(1);
+      log.warn(
+        `WASM streaming returned 0 batches for ${sizeMB}MB file - ` +
+        `this may indicate insufficient memory for large file processing`,
+        { operation: 'collectMeshesStreaming', data: { contentLength: this.content.length } },
+      );
     }
 
     // Ensure processing is complete
@@ -419,6 +411,7 @@ export class IfcLiteMeshCollector {
     const batchQueue: InstancedGeometry[][] = [];
     let resolveWaiting: (() => void) | null = null;
     let isComplete = false;
+    let processingError: Error | null = null;
 
     // Start async processing
     const processingPromise = this.ifcApi.parseMeshesInstancedAsync(this.content, {
@@ -445,13 +438,28 @@ export class IfcLiteMeshCollector {
           resolveWaiting = null;
         }
       },
+    }).catch((error) => {
+      processingError = error instanceof Error ? error : new Error(String(error));
+      log.error('WASM instanced streaming parsing failed', processingError, { operation: 'collectInstancedGeometryStreaming' });
+      isComplete = true;
+      if (resolveWaiting) {
+        resolveWaiting();
+        resolveWaiting = null;
+      }
     });
 
     // Yield batches as they become available
+    let yieldedBatchCount = 0;
     while (true) {
       // Yield any queued batches
       while (batchQueue.length > 0) {
+        yieldedBatchCount++;
         yield batchQueue.shift()!;
+      }
+
+      // Check for errors
+      if (processingError) {
+        throw processingError;
       }
 
       // Check if we're done
@@ -463,6 +471,17 @@ export class IfcLiteMeshCollector {
       await new Promise<void>((resolve) => {
         resolveWaiting = resolve;
       });
+    }
+
+    // Warn if WASM returned 0 results for a non-trivially-sized file
+    // This typically indicates WASM ran out of memory during parsing
+    if (yieldedBatchCount === 0 && this.content.length > 1000) {
+      const sizeMB = (this.content.length / (1024 * 1024)).toFixed(1);
+      log.warn(
+        `WASM instanced streaming returned 0 batches for ${sizeMB}MB file - ` +
+        `this may indicate insufficient memory for large file processing`,
+        { operation: 'collectInstancedGeometryStreaming', data: { contentLength: this.content.length } },
+      );
     }
 
     // Ensure processing is complete

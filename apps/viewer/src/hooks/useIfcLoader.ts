@@ -11,6 +11,7 @@
  */
 
 import { useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore } from '../store.js';
 import { IfcParser, detectFormat, parseIfcx, type IfcDataStore } from '@ifc-lite/parser';
 import { GeometryProcessor, GeometryQuality, type MeshData, type CoordinateInfo } from '@ifc-lite/geometry';
@@ -77,7 +78,16 @@ export function useIfcLoader() {
     appendGeometryBatch,
     updateMeshColors,
     updateCoordinateInfo,
-  } = useViewerStore();
+  } = useViewerStore(useShallow((s) => ({
+    setLoading: s.setLoading,
+    setError: s.setError,
+    setProgress: s.setProgress,
+    setIfcDataStore: s.setIfcDataStore,
+    setGeometryResult: s.setGeometryResult,
+    appendGeometryBatch: s.appendGeometryBatch,
+    updateMeshColors: s.updateMeshColors,
+    updateCoordinateInfo: s.updateCoordinateInfo,
+  })));
 
   // Cache operations from extracted hook
   const { loadFromCache, saveToCache } = useIfcCache();
@@ -450,9 +460,11 @@ export function useIfcLoader() {
 
               finalCoordinateInfo = event.coordinateInfo ?? null;
 
-              // Start data model parsing NOW — after geometry streaming is done
-              // so the parser doesn't compete with WASM for main-thread CPU.
-              startDataModelParsing();
+              // PERF: Defer data model parsing to next macrotask so the browser
+              // can paint the streaming-complete state first. parseColumnar()
+              // synchronously calls scanEntitiesFast() which blocks the main
+              // thread for ~7s on large files (487MB → 8.4M entities).
+              setTimeout(startDataModelParsing, 0);
 
               // Apply all accumulated color updates in a single store update
               // instead of one updateMeshColors() call per colorUpdate event.

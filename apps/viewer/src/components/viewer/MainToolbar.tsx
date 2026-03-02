@@ -196,37 +196,70 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
   const toggleLensPanel = useViewerStore((state) => state.toggleLensPanel);
   const setLensPanelVisible = useViewerStore((state) => state.setLensPanelVisible);
 
-  // Check which type geometries exist across ALL loaded models (federation-aware)
+  // Check which type geometries exist across ALL loaded models (federation-aware).
+  // PERF: Use meshes.length as dep proxy instead of full geometryResult, and
+  // scan incrementally — once a type is found it stays found, so we only scan
+  // NEW meshes since the last check. Per-model cursors ensure federated models
+  // each track their own scan position independently.
+  const typeGeomScanRef = useRef({
+    spaces: false, openings: false, site: false,
+    legacyLastLen: 0,
+    modelLastLen: new Map<string | number, number>(),
+  });
+  const meshLen = geometryResult?.meshes.length ?? 0;
   const typeGeometryExists = useMemo(() => {
-    const result = { spaces: false, openings: false, site: false };
+    const scan = typeGeomScanRef.current;
 
-    // Check all federated models
+    // Reset if legacy meshes array shrunk (new file loaded)
+    if (meshLen < scan.legacyLastLen) {
+      scan.spaces = false;
+      scan.openings = false;
+      scan.site = false;
+      scan.legacyLastLen = 0;
+      scan.modelLastLen.clear();
+    }
+
+    // Already found all types — nothing to do
+    if (scan.spaces && scan.openings && scan.site) {
+      return { spaces: scan.spaces, openings: scan.openings, site: scan.site };
+    }
+
+    // Check federated models (scan only new meshes per model)
     if (models.size > 0) {
-      for (const [, model] of models) {
+      for (const [modelId, model] of models) {
         const meshes = model.geometryResult?.meshes;
         if (!meshes) continue;
-        for (const m of meshes) {
-          if (m.ifcType === 'IfcSpace') result.spaces = true;
-          else if (m.ifcType === 'IfcOpeningElement') result.openings = true;
-          else if (m.ifcType === 'IfcSite') result.site = true;
-          // Early exit if all found
-          if (result.spaces && result.openings && result.site) return result;
+        const modelStart = scan.modelLastLen.get(modelId) ?? 0;
+        // Reset cursor if model was reloaded (mesh array shrunk)
+        const start = meshes.length < modelStart ? 0 : modelStart;
+        for (let i = start; i < meshes.length; i++) {
+          const t = meshes[i].ifcType;
+          if (t === 'IfcSpace') scan.spaces = true;
+          else if (t === 'IfcOpeningElement') scan.openings = true;
+          else if (t === 'IfcSite') scan.site = true;
+          if (scan.spaces && scan.openings && scan.site) break;
         }
+        scan.modelLastLen.set(modelId, meshes.length);
+        if (scan.spaces && scan.openings && scan.site) break;
       }
     }
 
-    // Fallback: also check legacy single-model geometryResult
+    // Legacy single-model path (scan only new meshes)
     if (geometryResult?.meshes) {
-      for (const m of geometryResult.meshes) {
-        if (m.ifcType === 'IfcSpace') result.spaces = true;
-        else if (m.ifcType === 'IfcOpeningElement') result.openings = true;
-        else if (m.ifcType === 'IfcSite') result.site = true;
-        if (result.spaces && result.openings && result.site) return result;
+      const meshes = geometryResult.meshes;
+      for (let i = scan.legacyLastLen; i < meshes.length; i++) {
+        const t = meshes[i].ifcType;
+        if (t === 'IfcSpace') scan.spaces = true;
+        else if (t === 'IfcOpeningElement') scan.openings = true;
+        else if (t === 'IfcSite') scan.site = true;
+        if (scan.spaces && scan.openings && scan.site) break;
       }
     }
 
-    return result;
-  }, [models, geometryResult]);
+    scan.legacyLastLen = meshLen;
+    return { spaces: scan.spaces, openings: scan.openings, site: scan.site };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- meshLen is a stable proxy for geometryResult
+  }, [models, meshLen]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;

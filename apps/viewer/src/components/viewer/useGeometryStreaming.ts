@@ -15,6 +15,9 @@ export interface UseGeometryStreamingParams {
   rendererRef: MutableRefObject<Renderer | null>;
   isInitialized: boolean;
   geometry: MeshData[] | null;
+  /** Monotonic counter — triggers the streaming effect even when the geometry
+   *  array reference is stable (incremental filtering reuses the same array). */
+  geometryVersion?: number;
   coordinateInfo?: CoordinateInfo;
   isStreaming: boolean;
   geometryBoundsRef: MutableRefObject<{ min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }>;
@@ -31,6 +34,7 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
     rendererRef,
     isInitialized,
     geometry,
+    geometryVersion,
     coordinateInfo,
     isStreaming,
     geometryBoundsRef,
@@ -49,6 +53,11 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
   const cameraFittedRef = useRef<boolean>(false);
   const finalBoundsRefittedRef = useRef<boolean>(false); // Track if we've refitted after streaming
 
+  // Track camera state after initial fit to detect user interaction during streaming.
+  // If user orbits/pans/zooms during streaming, we preserve their position at completion
+  // instead of snapping back to the computed view. Bounds still update for "home" etc.
+  const cameraStateAfterFitRef = useRef<{ px: number; py: number; pz: number; tx: number; ty: number; tz: number } | null>(null);
+
   // Render throttling during streaming
   const lastStreamRenderTimeRef = useRef<number>(0);
   const STREAM_RENDER_THROTTLE_MS = 200; // Render at most every 200ms during streaming
@@ -65,6 +74,7 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
         processedMeshIdsRef.current.clear();
         cameraFittedRef.current = false;
         finalBoundsRefittedRef.current = false;
+        cameraStateAfterFitRef.current = null;
         // Clear scene if renderer is ready
         if (renderer && isInitialized) {
           renderer.getScene().clear();
@@ -110,6 +120,7 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
       processedMeshIdsRef.current.clear();
       cameraFittedRef.current = false;
       finalBoundsRefittedRef.current = false;
+      cameraStateAfterFitRef.current = null;
       lastGeometryLengthRef.current = 0;
       lastGeometryRef.current = geometry;
       // Reset camera state (clear orbit pivot, stop inertia, cancel animations)
@@ -139,6 +150,7 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
         processedMeshIdsRef.current.clear();
         cameraFittedRef.current = false;
         finalBoundsRefittedRef.current = false;
+        cameraStateAfterFitRef.current = null;
         lastGeometryLengthRef.current = 0;
         lastGeometryRef.current = geometry;
         // Reset camera state
@@ -150,43 +162,84 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
         };
       }
     } else if (currentLength === lastLength) {
-      // No geometry change - but check if we need to update bounds when streaming completes
-      if (cameraFittedRef.current && !isStreaming && !finalBoundsRefittedRef.current && coordinateInfo?.shiftedBounds) {
-        const shiftedBounds = coordinateInfo.shiftedBounds;
-        const newMaxSize = Math.max(
-          shiftedBounds.max.x - shiftedBounds.min.x,
-          shiftedBounds.max.y - shiftedBounds.min.y,
-          shiftedBounds.max.z - shiftedBounds.min.z
-        );
-
-        if (newMaxSize > 0 && Number.isFinite(newMaxSize)) {
-          // Only refit camera for LARGE models (>1000 meshes) where geometry streamed in multiple batches
-          // Small models complete in one batch, so their initial camera fit is already correct
-          const isLargeModel = geometry.length > 1000;
-
-          if (isLargeModel) {
-            const oldBounds = geometryBoundsRef.current;
-            const oldMaxSize = Math.max(
-              oldBounds.max.x - oldBounds.min.x,
-              oldBounds.max.y - oldBounds.min.y,
-              oldBounds.max.z - oldBounds.min.z
-            );
-
-            // Refit camera if bounds expanded significantly (>10% larger)
-            // This handles skyscrapers where upper floors arrive in later batches
-            const boundsExpanded = newMaxSize > oldMaxSize * 1.1;
-
-            if (boundsExpanded) {
-              renderer.getCamera().fitToBounds(shiftedBounds.min, shiftedBounds.max);
+      // No geometry change — update bounds when streaming completes.
+      // Two behaviours depending on user camera interaction:
+      //   • User hasn't touched the camera → refit to final bounds (fixes models
+      //     whose first-batch bounds were too tight / off-centre).
+      //   • User HAS orbited/panned/zoomed → preserve their position; just store
+      //     the final bounds so "Home" / zoom-to-fit still work correctly.
+      if (cameraFittedRef.current && !isStreaming && !finalBoundsRefittedRef.current) {
+        // Compute EXACT bounds from all geometry vertices.
+        // coordinateInfo.shiftedBounds uses fast vertex-sampling (first+last vertex per mesh)
+        // which can miss the true extremes — e.g., a 22-storey building whose highest vertices
+        // are mid-buffer gets truncated bounds.  Scanning all vertices here is ~15 ms for 3 M
+        // vertices and only runs once at streaming completion.
+        const MAX_VALID_COORD = 10000;
+        const exactBounds = {
+          min: { x: Infinity, y: Infinity, z: Infinity },
+          max: { x: -Infinity, y: -Infinity, z: -Infinity },
+        };
+        for (let gi = 0; gi < geometry.length; gi++) {
+          const positions = geometry[gi].positions;
+          for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i];
+            const y = positions[i + 1];
+            const z = positions[i + 2];
+            if (Math.abs(x) < MAX_VALID_COORD && Math.abs(y) < MAX_VALID_COORD && Math.abs(z) < MAX_VALID_COORD) {
+              if (x < exactBounds.min.x) exactBounds.min.x = x;
+              if (y < exactBounds.min.y) exactBounds.min.y = y;
+              if (z < exactBounds.min.z) exactBounds.min.z = z;
+              if (x > exactBounds.max.x) exactBounds.max.x = x;
+              if (y > exactBounds.max.y) exactBounds.max.y = y;
+              if (z > exactBounds.max.z) exactBounds.max.z = z;
             }
           }
+        }
 
-          // Always update bounds for accurate zoom-to-fit, home view, etc.
-          geometryBoundsRef.current = { min: { ...shiftedBounds.min }, max: { ...shiftedBounds.max } };
+        const exactMaxSize = Math.max(
+          exactBounds.max.x - exactBounds.min.x,
+          exactBounds.max.y - exactBounds.min.y,
+          exactBounds.max.z - exactBounds.min.z
+        );
+
+        if (exactBounds.min.x !== Infinity && exactMaxSize > 0 && Number.isFinite(exactMaxSize)) {
+          // Detect whether the user moved the camera during streaming
+          const snap = cameraStateAfterFitRef.current;
+          let userMovedCamera = false;
+          if (snap) {
+            const pos = renderer.getCamera().getPosition();
+            const tgt = renderer.getCamera().getTarget();
+            const EPS = 0.5; // half a metre — ignores floating-point jitter
+            userMovedCamera =
+              Math.abs(pos.x - snap.px) > EPS || Math.abs(pos.y - snap.py) > EPS || Math.abs(pos.z - snap.pz) > EPS ||
+              Math.abs(tgt.x - snap.tx) > EPS || Math.abs(tgt.y - snap.ty) > EPS || Math.abs(tgt.z - snap.tz) > EPS;
+          }
+
+          if (!userMovedCamera) {
+            // User hasn't interacted — refit to exact full bounds
+            renderer.getCamera().fitToBounds(exactBounds.min, exactBounds.max);
+          }
+
+          // Always update stored bounds for Home / zoom-to-fit
+          geometryBoundsRef.current = { min: { ...exactBounds.min }, max: { ...exactBounds.max } };
           finalBoundsRefittedRef.current = true;
         }
       }
       return;
+    }
+
+    // Detect post-streaming type visibility toggle: geometry grew while NOT streaming.
+    // The filtered array was rebuilt from scratch (spaces/openings/site toggled ON),
+    // with new meshes interleaved throughout — not just appended at the end.
+    // We must clear the scene and re-add ALL meshes.
+    // Distinguish from streaming-completion (prevIsStreaming→!isStreaming) where new
+    // meshes ARE appended at the end and scene should NOT be cleared.
+    if (isIncremental && !isStreaming && !prevIsStreamingRef.current) {
+      scene.clear();
+      processedMeshIdsRef.current.clear();
+      // Don't reset camera or bounds — user just toggled visibility
+      lastGeometryLengthRef.current = 0;
+      lastGeometryRef.current = geometry;
     }
 
     // For incremental batches: update reference and continue to add new meshes
@@ -196,28 +249,37 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
       lastGeometryRef.current = geometry;
     }
 
-    // FIX: When not streaming (type visibility toggle), new meshes can be ANYWHERE in the array,
-    // not just at the end. During streaming, new meshes ARE appended, so slice is safe.
-    // After streaming completes, filter changes can insert meshes at any position.
-    const meshesToAdd = isStreaming
-      ? geometry.slice(lastGeometryLengthRef.current)  // Streaming: new meshes at end
-      : geometry;  // Post-streaming: scan entire array for unprocessed meshes
-
-    // Filter out already processed meshes
-    // NOTE: Multiple meshes can share the same expressId AND same color (e.g., door inner framing pieces),
-    // so we use expressId + array index as a compound key to ensure all submeshes are processed.
-    const newMeshes: MeshData[] = [];
-    const startIndex = isStreaming ? lastGeometryLengthRef.current : 0;
-    for (let i = 0; i < meshesToAdd.length; i++) {
-      const meshData = meshesToAdd[i];
-      // Use expressId + global array index as key to ensure each mesh is unique
-      // (same expressId can have multiple submeshes with same color, e.g., door framing)
-      const globalIndex = startIndex + i;
-      const compoundKey = `${meshData.expressId}:${globalIndex}`;
-
-      if (!processedMeshIdsRef.current.has(compoundKey)) {
-        newMeshes.push(meshData);
-        processedMeshIdsRef.current.add(compoundKey);
+    // PERF: During streaming, new meshes are ALWAYS appended at the end.
+    // Skip the compound key dedup (208K string allocations + Set lookups)
+    // and array copy (.slice()). Use index-based iteration directly.
+    //
+    // FIX: Use fast path for incremental appends too (not just streaming).
+    // When streaming completes, isStreaming becomes false in the same render as the
+    // final appendGeometryBatch. The slow path would re-add ALL meshes because
+    // processedMeshIdsRef was never populated during streaming, causing double geometry.
+    // For visibility toggles, lastGeometryLengthRef was reset to 0 above, so the
+    // fast path naturally starts from 0 (adding ALL meshes after scene.clear).
+    let newMeshes: MeshData[];
+    if (isStreaming || isIncremental) {
+      // Fast path: iterate from lastLength directly
+      // During streaming: new meshes appended at end, start = previous length
+      // After visibility toggle: scene was cleared, start = 0, adds everything
+      const start = lastGeometryLengthRef.current;
+      newMeshes = [];
+      for (let i = start; i < geometry.length; i++) {
+        newMeshes.push(geometry[i]);
+      }
+    } else {
+      // Slow path: scan entire array for unprocessed meshes
+      // Only used when array was fully rebuilt (not incremental)
+      newMeshes = [];
+      for (let i = 0; i < geometry.length; i++) {
+        const meshData = geometry[i];
+        const compoundKey = `${meshData.expressId}:${i}`;
+        if (!processedMeshIdsRef.current.has(compoundKey)) {
+          newMeshes.push(meshData);
+          processedMeshIdsRef.current.add(compoundKey);
+        }
       }
     }
 
@@ -294,6 +356,10 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
         renderer.getCamera().fitToBounds(shiftedBounds.min, shiftedBounds.max);
         geometryBoundsRef.current = { min: { ...shiftedBounds.min }, max: { ...shiftedBounds.max } };
         cameraFittedRef.current = true;
+        // Snapshot camera state so we can detect user interaction during streaming
+        const pos = renderer.getCamera().getPosition();
+        const tgt = renderer.getCamera().getTarget();
+        cameraStateAfterFitRef.current = { px: pos.x, py: pos.y, pz: pos.z, tx: tgt.x, ty: tgt.y, tz: tgt.z };
       }
     } else if (!cameraFittedRef.current && geometry.length > 0 && !isStreaming) {
       // Fallback: calculate bounds from geometry array (only when streaming is complete)
@@ -336,6 +402,9 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
         renderer.getCamera().fitToBounds(fallbackBounds.min, fallbackBounds.max);
         geometryBoundsRef.current = fallbackBounds;
         cameraFittedRef.current = true;
+        const pos = renderer.getCamera().getPosition();
+        const tgt = renderer.getCamera().getTarget();
+        cameraStateAfterFitRef.current = { px: pos.x, py: pos.y, pz: pos.z, tx: tgt.x, ty: tgt.y, tz: tgt.z };
       }
     }
 
@@ -354,7 +423,7 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
       renderer.render();
       lastStreamRenderTimeRef.current = now;
     }
-  }, [geometry, coordinateInfo, isInitialized, isStreaming]);
+  }, [geometry, geometryVersion, coordinateInfo, isInitialized, isStreaming]);
 
   // Force render when streaming completes (progress goes from <100% to 100% or null)
   const prevIsStreamingRef = useRef(isStreaming);
@@ -368,9 +437,70 @@ export function useGeometryStreaming(params: UseGeometryStreamingParams): void {
       const pipeline = renderer.getPipeline();
       const scene = renderer.getScene();
 
-      // Finalize streaming: destroy temporary fragments and do one O(N) full merge
+      // Finalize streaming: destroy temporary fragments and do one O(N) full merge.
+      // Must run synchronously BEFORE pendingMeshColorUpdates effect — otherwise
+      // fragment batches with stale colors render alongside new proper batches.
       if (device && pipeline) {
         scene.finalizeStreaming(device, pipeline);
+      }
+
+      // Compute exact bounds and refit camera if not already done.
+      // This MUST happen here rather than only in the main geometry effect's
+      // `currentLength === lastLength` branch, because React may batch the
+      // final appendGeometryBatch (geometry grows) and setIsStreaming(false)
+      // into the SAME render — making the main effect take the incremental
+      // `currentLength > lastLength` path and skip the bounds refit entirely.
+      // This effect reliably fires on the isStreaming true→false transition.
+      if (cameraFittedRef.current && !finalBoundsRefittedRef.current && geometry && geometry.length > 0) {
+        const MAX_VALID_COORD = 10000;
+        const exactBounds = {
+          min: { x: Infinity, y: Infinity, z: Infinity },
+          max: { x: -Infinity, y: -Infinity, z: -Infinity },
+        };
+        for (let gi = 0; gi < geometry.length; gi++) {
+          const positions = geometry[gi].positions;
+          for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i];
+            const y = positions[i + 1];
+            const z = positions[i + 2];
+            if (Math.abs(x) < MAX_VALID_COORD && Math.abs(y) < MAX_VALID_COORD && Math.abs(z) < MAX_VALID_COORD) {
+              if (x < exactBounds.min.x) exactBounds.min.x = x;
+              if (y < exactBounds.min.y) exactBounds.min.y = y;
+              if (z < exactBounds.min.z) exactBounds.min.z = z;
+              if (x > exactBounds.max.x) exactBounds.max.x = x;
+              if (y > exactBounds.max.y) exactBounds.max.y = y;
+              if (z > exactBounds.max.z) exactBounds.max.z = z;
+            }
+          }
+        }
+
+        const exactMaxSize = Math.max(
+          exactBounds.max.x - exactBounds.min.x,
+          exactBounds.max.y - exactBounds.min.y,
+          exactBounds.max.z - exactBounds.min.z
+        );
+
+        if (exactBounds.min.x !== Infinity && exactMaxSize > 0 && Number.isFinite(exactMaxSize)) {
+          // Detect whether the user moved the camera during streaming
+          const snap = cameraStateAfterFitRef.current;
+          let userMovedCamera = false;
+          if (snap) {
+            const pos = renderer.getCamera().getPosition();
+            const tgt = renderer.getCamera().getTarget();
+            const EPS = 0.5; // half a metre — ignores floating-point jitter
+            userMovedCamera =
+              Math.abs(pos.x - snap.px) > EPS || Math.abs(pos.y - snap.py) > EPS || Math.abs(pos.z - snap.pz) > EPS ||
+              Math.abs(tgt.x - snap.tx) > EPS || Math.abs(tgt.y - snap.ty) > EPS || Math.abs(tgt.z - snap.tz) > EPS;
+          }
+
+          if (!userMovedCamera) {
+            renderer.getCamera().fitToBounds(exactBounds.min, exactBounds.max);
+          }
+
+          // Always update stored bounds for Home / zoom-to-fit
+          geometryBoundsRef.current = { min: { ...exactBounds.min }, max: { ...exactBounds.max } };
+          finalBoundsRefittedRef.current = true;
+        }
       }
 
       renderer.render();
