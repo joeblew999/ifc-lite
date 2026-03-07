@@ -50,6 +50,8 @@ export interface Tile {
   refine?: 'ADD' | 'REPLACE';
   /** Optional 4x4 column-major transform */
   transform?: number[];
+  /** Implicit tiling extension (3D Tiles 1.1) */
+  implicitTiling?: ImplicitTiling;
 }
 
 export interface TileContent {
@@ -59,6 +61,55 @@ export interface TileContent {
   boundingVolume?: BoundingVolume;
   /** Optional metadata group (3D Tiles 1.1) */
   group?: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMPLICIT TILING (3D Tiles 1.1)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface ImplicitTiling {
+  /** Subdivision scheme */
+  subdivisionScheme: 'QUADTREE' | 'OCTREE';
+  /** Number of levels in each subtree */
+  subtreeLevels: number;
+  /** Number of levels available */
+  availableLevels: number;
+  /** Subtree file URI template (e.g., 'subtrees/{level}/{x}/{y}/{z}.subtree') */
+  subtrees: { uri: string };
+}
+
+/**
+ * Subtree descriptor per the 3D Tiles 1.1 implicit tiling spec.
+ * Stores availability bitstreams for a portion of the implicit tree.
+ */
+export interface Subtree {
+  /** Which tile nodes exist in this subtree */
+  tileAvailability: Availability;
+  /** Which tile nodes have content */
+  contentAvailability: Availability[];
+  /** Which child subtrees exist (for the bottom layer of this subtree) */
+  childSubtreeAvailability: Availability;
+  /** Inline binary buffers for availability bitstreams */
+  buffers?: SubtreeBuffer[];
+  /** Views into buffers */
+  bufferViews?: SubtreeBufferView[];
+}
+
+export interface Availability {
+  /** All available (constant true) */
+  constant?: 0 | 1;
+  /** Index into bufferViews for the bitstream */
+  bufferView?: number;
+}
+
+export interface SubtreeBuffer {
+  byteLength: number;
+}
+
+export interface SubtreeBufferView {
+  buffer: number;
+  byteOffset: number;
+  byteLength: number;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -112,6 +163,50 @@ export interface TilesetGeneratorOptions {
   includeMetadata?: boolean;
   /** Optional model identifier for federation */
   modelId?: string;
+  /**
+   * Refinement strategy (default: 'ADD').
+   * - 'ADD': Parent tiles have no content; children are added on top.
+   * - 'REPLACE': Parent tiles contain simplified LOD geometry;
+   *   children replace the parent when the viewer zooms in.
+   */
+  refine?: 'ADD' | 'REPLACE';
+}
+
+export interface ImplicitTilesetGeneratorOptions {
+  /** Subdivision scheme (default: 'OCTREE') */
+  subdivisionScheme?: 'QUADTREE' | 'OCTREE';
+  /** Maximum meshes per leaf tile (default: 256) */
+  maxMeshesPerTile?: number;
+  /** Number of levels per subtree file (default: 4) */
+  subtreeLevels?: number;
+  /** Base path for tile content URIs (default: './tiles/') */
+  contentBasePath?: string;
+  /** Base path for subtree files (default: './subtrees/') */
+  subtreeBasePath?: string;
+  /** Include IFC metadata in tileset schema (default: true) */
+  includeMetadata?: boolean;
+  /** Model identifier for federation */
+  modelId?: string;
+  /** Minimum geometric error in meters (default: 0) */
+  minGeometricError?: number;
+}
+
+export interface ImplicitTilesetOutput {
+  /** The tileset.json content */
+  tileset: Tileset;
+  /** Generated tile GLB files keyed by template path */
+  tiles: GeneratedTile[];
+  /** Generated subtree binary files */
+  subtrees: GeneratedSubtree[];
+}
+
+export interface GeneratedSubtree {
+  /** Path for this subtree (e.g., 'subtrees/0/0/0/0.subtree') */
+  path: string;
+  /** Subtree JSON descriptor */
+  subtreeJson: Subtree;
+  /** Binary buffer for availability bitstreams */
+  buffer: Uint8Array;
 }
 
 export interface FederatedTilesetOptions {

@@ -24,6 +24,7 @@ import type {
   BoundingVolume,
 } from './types.js';
 import { buildGlbContent } from './tile-content-builder.js';
+import { simplifyForParentTile } from './mesh-simplifier.js';
 
 const DEFAULT_MAX_MESHES_PER_TILE = 256;
 const DEFAULT_CONTENT_BASE_PATH = './tiles/';
@@ -44,6 +45,7 @@ export class TilesetGenerator {
       contentBasePath: options.contentBasePath ?? DEFAULT_CONTENT_BASE_PATH,
       includeMetadata: options.includeMetadata ?? true,
       modelId: options.modelId ?? 'default',
+      refine: options.refine ?? 'ADD',
     };
   }
 
@@ -68,6 +70,12 @@ export class TilesetGenerator {
     const tiles: GeneratedTile[] = [];
     let tileIndex = 0;
 
+    // Estimate max depth for LOD simplification ratio scaling
+    const estimatedMaxDepth = Math.min(
+      15,
+      Math.ceil(Math.log2(meshes.length / this.options.maxMeshesPerTile)) + 1,
+    );
+
     const rootTile = this.buildTileTree(
       meshes,
       globalBounds,
@@ -75,6 +83,7 @@ export class TilesetGenerator {
       tiles,
       () => tileIndex++,
       0,
+      Math.max(1, estimatedMaxDepth),
     );
 
     const tileset: Tileset = {
@@ -106,6 +115,10 @@ export class TilesetGenerator {
 
   /**
    * Recursively build the tile tree by spatially subdividing meshes.
+   *
+   * In ADD mode, internal nodes have no content; leaf tiles hold all geometry.
+   * In REPLACE mode, internal nodes contain simplified LOD geometry;
+   * children replace the parent as the viewer zooms in.
    */
   private buildTileTree(
     meshes: MeshData[],
@@ -114,6 +127,7 @@ export class TilesetGenerator {
     outputTiles: GeneratedTile[],
     nextTileIndex: () => number,
     depth: number,
+    maxDepth: number,
   ): Tile {
     const boundingVolume = aabbToBoundingVolume(bounds);
 
@@ -159,14 +173,36 @@ export class TilesetGenerator {
     const childError = geometricError / 2;
 
     const children: Tile[] = [
-      this.buildTileTree(left, leftBounds, childError, outputTiles, nextTileIndex, depth + 1),
-      this.buildTileTree(right, rightBounds, childError, outputTiles, nextTileIndex, depth + 1),
+      this.buildTileTree(left, leftBounds, childError, outputTiles, nextTileIndex, depth + 1, maxDepth),
+      this.buildTileTree(right, rightBounds, childError, outputTiles, nextTileIndex, depth + 1, maxDepth),
     ];
+
+    const refine = this.options.refine;
+
+    // In REPLACE mode, parent tiles get simplified LOD content
+    if (refine === 'REPLACE') {
+      const simplified = simplifyForParentTile(meshes, depth, maxDepth);
+      if (simplified.length > 0) {
+        const idx = nextTileIndex();
+        const path = `${this.options.contentBasePath}tile_lod_${idx}.glb`;
+        const glb = buildGlbContent(simplified);
+        const expressIds = simplified.map(m => m.expressId);
+        outputTiles.push({ path, glb, expressIds });
+
+        return {
+          boundingVolume,
+          geometricError,
+          refine: 'REPLACE',
+          content: { uri: path },
+          children,
+        };
+      }
+    }
 
     return {
       boundingVolume,
       geometricError,
-      refine: 'ADD',
+      refine,
       children,
     };
   }
