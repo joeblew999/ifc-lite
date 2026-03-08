@@ -1042,10 +1042,10 @@ export interface InitOutput {
   readonly meshcollection_rtcOffsetX: (a: number) => number;
   readonly symboliccircle_expressId: (a: number) => number;
   readonly __wbg_gpuinstancedgeometryref_free: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_469: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;
   readonly __wasm_bindgen_func_elem_1021: (a: number, b: number, c: number) => void;
   readonly __wasm_bindgen_func_elem_1019: (a: number, b: number) => void;
+  readonly __wasm_bindgen_func_elem_469: (a: number, b: number) => void;
+  readonly __wasm_bindgen_func_elem_467: (a: number, b: number) => void;
   readonly __wasm_bindgen_func_elem_1052: (a: number, b: number, c: number, d: number) => void;
   readonly __wbindgen_export: (a: number) => void;
   readonly __wbindgen_export2: (a: number, b: number, c: number) => void;

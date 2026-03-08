@@ -150,7 +150,7 @@ cd ifc-lite
 pnpm install && pnpm build && pnpm dev   # opens viewer at localhost:5173
 ```
 
-If you need benchmark fixtures, fetch only the files you plan to use:
+If you need large IFC fixtures for benchmarks or stress tests, fetch only the files you need:
 
 ```bash
 git lfs pull --include="tests/models/ara3d/AC20-FZK-Haus.ifc"
