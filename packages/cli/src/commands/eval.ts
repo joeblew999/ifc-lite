@@ -26,10 +26,36 @@ export async function evalCommand(args: string[]): Promise<void> {
   const { bim } = await createHeadlessContext(filePath);
 
   // Build evaluation context
+  // Detect if expression is a statement (contains const/let/var/for/if/return or ;)
+  // If so, wrap in async IIFE to allow multi-statement code
+  const isStatement = /^\s*(const |let |var |for |if |while |return |class |function |try |switch |{)/.test(expression)
+    || expression.includes(';');
+
+  let body: string;
+  if (isStatement) {
+    // For multi-statement code: if the last statement is an expression (not a declaration),
+    // auto-return it so users don't need to write explicit return
+    const statements = expression.split(';').map(s => s.trim()).filter(Boolean);
+    const last = statements[statements.length - 1];
+    const isLastDeclaration = /^(const |let |var |for |if |while |return |class |function |try |switch |{)/.test(last);
+    if (!isLastDeclaration && statements.length > 1) {
+      // Replace last statement with return
+      statements[statements.length - 1] = `return (${last})`;
+    } else if (isLastDeclaration && /^(const |let |var )\s*(\w+)/.test(last)) {
+      // If last is a variable declaration, return the variable name
+      const varMatch = last.match(/^(?:const |let |var )\s*(\w+)/);
+      if (varMatch) {
+        statements.push(`return ${varMatch[1]}`);
+      }
+    }
+    body = `return (async () => { ${statements.join('; ')} })()`;
+  } else {
+    body = `return (${expression})`;
+  }
+
   const evalFn = new Function('bim', `
     "use strict";
-    const result = (${expression});
-    return result;
+    ${body};
   `);
 
   try {
