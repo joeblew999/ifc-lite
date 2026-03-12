@@ -179,10 +179,10 @@ export const useViewerStore = create<ViewerState>()((...args) => ({
 
       // Section plane
       sectionPlane: {
-        axis: SECTION_PLANE_DEFAULTS.AXIS,
-        position: SECTION_PLANE_DEFAULTS.POSITION,
-        enabled: SECTION_PLANE_DEFAULTS.ENABLED,
-        flipped: SECTION_PLANE_DEFAULTS.FLIPPED,
+        normal: { ...SECTION_PLANE_DEFAULTS.normal },
+        distance: SECTION_PLANE_DEFAULTS.distance,
+        enabled: SECTION_PLANE_DEFAULTS.enabled,
+        flipped: SECTION_PLANE_DEFAULTS.flipped,
       },
 
       // Camera

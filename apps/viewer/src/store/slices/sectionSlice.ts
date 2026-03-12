@@ -27,7 +27,12 @@ export interface SectionSlice {
   resetSectionPlane: () => void;
 }
 
-const getDefaultSectionPlane = (): SectionPlane => ({ ...SECTION_PLANE_DEFAULTS });
+const getDefaultSectionPlane = (): SectionPlane => ({
+  normal: { ...SECTION_PLANE_DEFAULTS.normal },
+  distance: SECTION_PLANE_DEFAULTS.distance,
+  enabled: SECTION_PLANE_DEFAULTS.enabled,
+  flipped: SECTION_PLANE_DEFAULTS.flipped,
+});
 
 export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice> = (set) => ({
   // Initial state
