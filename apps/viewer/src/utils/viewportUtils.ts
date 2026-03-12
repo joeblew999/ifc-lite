@@ -8,6 +8,7 @@
  */
 
 import type { MeshData } from '@ifc-lite/geometry';
+import type { SectionPlane } from '@/store/types.js';
 
 // ============================================================================
 // Types
@@ -31,14 +32,9 @@ export interface BoundingBox3D {
 }
 
 /**
- * Section plane configuration
+ * Section plane configuration for render options
  */
-export interface SectionPlaneConfig {
-  enabled: boolean;
-  height: number;
-  min?: number;
-  max?: number;
-}
+export type SectionPlaneConfig = SectionPlane;
 
 /**
  * Render options for the WebGPU renderer
@@ -61,8 +57,7 @@ export interface ViewportStateRefs {
   selectedEntityId: number | null;
   clearColor: [number, number, number, number];
   activeTool: string;
-  sectionPlane: { enabled: boolean; height: number };
-  sectionRange: { min: number; max: number } | null;
+  sectionPlane: SectionPlane;
 }
 
 // ============================================================================
@@ -249,12 +244,8 @@ export function buildRenderOptions(refs: ViewportStateRefs): RenderOptions {
   };
 
   // Add section plane if enabled
-  if (refs.activeTool === 'section') {
-    options.sectionPlane = {
-      ...refs.sectionPlane,
-      min: refs.sectionRange?.min,
-      max: refs.sectionRange?.max,
-    };
+  if (refs.activeTool === 'section' && refs.sectionPlane.enabled) {
+    options.sectionPlane = refs.sectionPlane;
   }
 
   return options;

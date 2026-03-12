@@ -19,10 +19,18 @@ import { formatArea, computePolygonCentroid } from '@/components/viewer/tools/co
 import { generateCloudSVGPath } from '@/components/viewer/tools/cloudPathGenerator';
 import type { PolygonArea2DResult, TextAnnotation2D, CloudAnnotation2D } from '@/store/slices/drawing2DSlice';
 
+/** Map an arbitrary plane normal to the dominant geometric axis for 2D projection */
+function dominantSectionAxis(normal: { x: number; y: number; z: number }): 'down' | 'front' | 'side' {
+  const absX = Math.abs(normal.x), absY = Math.abs(normal.y), absZ = Math.abs(normal.z);
+  if (absY >= absX && absY >= absZ) return 'down';
+  if (absZ >= absX) return 'front';
+  return 'side';
+}
+
 interface UseDrawingExportParams {
   drawing: Drawing2D | null;
   displayOptions: { showHiddenLines: boolean; scale: number };
-  sectionPlane: { axis: 'down' | 'front' | 'side'; position: number; flipped: boolean };
+  sectionPlane: { normal: { x: number; y: number; z: number }; distance: number; flipped: boolean };
   activePresetId: string | null;
   entityColorMap: Map<number, [number, number, number, number]>;
   overridesEnabled: boolean;
@@ -96,7 +104,7 @@ function useDrawingExport({
     // - 'down' (plan view): DON'T flip Y so north (Z+) is up
     // - 'front' and 'side': flip Y so height (Y+) is up
     // - 'side': also flip X to look from conventional direction
-    const currentAxis = sectionPlane.axis;
+    const currentAxis = dominantSectionAxis(sectionPlane.normal);
     const flipY = currentAxis !== 'down';
     const flipX = currentAxis === 'side';
 
@@ -388,7 +396,7 @@ function useDrawingExport({
 
     svg += '</svg>';
     return svg;
-  }, [drawing, displayOptions, activePresetId, entityColorMap, overridesEnabled, overrideEngine, measure2DResults, polygonArea2DResults, textAnnotations2D, cloudAnnotations2D, sectionPlane.axis]);
+  }, [drawing, displayOptions, activePresetId, entityColorMap, overridesEnabled, overrideEngine, measure2DResults, polygonArea2DResults, textAnnotations2D, cloudAnnotations2D, sectionPlane.normal]);
 
   // Generate SVG with drawing sheet (frame, title block, scale bar)
   // This generates coordinates directly in paper mm space (like the canvas rendering)
@@ -415,7 +423,7 @@ function useDrawingExport({
     // - 'down' (plan view): DON'T flip Y so north (Z+) is up
     // - 'front' and 'side': flip Y so height (Y+) is up
     // - 'side': also flip X to look from conventional direction
-    const currentAxis = sectionPlane.axis;
+    const currentAxis = dominantSectionAxis(sectionPlane.normal);
     const flipY = currentAxis !== 'down';
     const flipX = currentAxis === 'side';
 
@@ -631,9 +639,10 @@ function useDrawingExport({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
+    const axis = dominantSectionAxis(sectionPlane.normal);
     const filename = (sheetEnabled && activeSheet)
-      ? `${activeSheet.name.replace(/\s+/g, '-')}-${sectionPlane.axis}-${sectionPlane.position}.svg`
-      : `section-${sectionPlane.axis}-${sectionPlane.position}.svg`;
+      ? `${activeSheet.name.replace(/\s+/g, '-')}-${axis}-${sectionPlane.distance.toFixed(1)}.svg`
+      : `section-${axis}-${sectionPlane.distance.toFixed(1)}.svg`;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
@@ -652,9 +661,10 @@ function useDrawingExport({
       return;
     }
 
+    const printAxis = dominantSectionAxis(sectionPlane.normal);
     const title = (sheetEnabled && activeSheet)
-      ? `${activeSheet.name} - ${sectionPlane.axis} at ${sectionPlane.position}%`
-      : `Section Drawing - ${sectionPlane.axis} at ${sectionPlane.position}%`;
+      ? `${activeSheet.name} - ${printAxis} at ${sectionPlane.distance.toFixed(1)}`
+      : `Section Drawing - ${printAxis} at ${sectionPlane.distance.toFixed(1)}`;
 
     // Write print-friendly HTML with the SVG
     printWindow.document.write(`

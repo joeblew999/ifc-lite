@@ -9,7 +9,6 @@
 
 import { useEffect, type MutableRefObject } from 'react';
 import type { Renderer, CutPolygon2D, DrawingLine2D, VisualEnhancementOptions } from '@ifc-lite/renderer';
-import type { CoordinateInfo } from '@ifc-lite/geometry';
 import type { Drawing2D } from '@ifc-lite/drawing-2d';
 import type { SectionPlane } from '@/store';
 import { getThemeClearColor } from '../../utils/viewportUtils.js';
@@ -31,8 +30,6 @@ export interface UseRenderUpdatesParams {
   selectedModelIndex: number | undefined;
   activeTool: string;
   sectionPlane: SectionPlane;
-  sectionRange: { min: number; max: number } | null;
-  coordinateInfo?: CoordinateInfo;
 
   // Refs for theme re-render
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
@@ -41,7 +38,6 @@ export interface UseRenderUpdatesParams {
   selectedModelIndexRef: MutableRefObject<number | undefined>;
   selectedEntityIdsRef: MutableRefObject<Set<number> | undefined>;
   sectionPlaneRef: MutableRefObject<SectionPlane>;
-  sectionRangeRef: MutableRefObject<{ min: number; max: number } | null>;
   activeToolRef: MutableRefObject<string>;
 
   // Drawing 2D
@@ -64,15 +60,12 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
     selectedModelIndex,
     activeTool,
     sectionPlane,
-    sectionRange,
-    coordinateInfo,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     selectedEntityIdsRef,
     sectionPlaneRef,
-    sectionRangeRef,
     activeToolRef,
     drawing2D,
     show3DOverlay,
@@ -81,9 +74,7 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
 
   // Theme-aware clear color update
   useEffect(() => {
-    // Update clear color when theme changes
     clearColorRef.current = getThemeClearColor(theme as 'light' | 'dark');
-    // Re-render with new clear color
     const renderer = rendererRef.current;
     if (renderer && isInitialized) {
       renderer.render({
@@ -102,16 +93,13 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
     const renderer = rendererRef.current;
     if (!renderer || !isInitialized) return;
 
-    // Only show overlay when section tool is active, we have a drawing, AND 3D overlay is enabled
     if (activeTool === 'section' && drawing2D && drawing2D.cutPolygons.length > 0 && show3DOverlay) {
-      // Convert Drawing2D format to renderer format
       const polygons: CutPolygon2D[] = drawing2D.cutPolygons.map((cp) => ({
         polygon: cp.polygon,
         ifcType: cp.ifcType,
-        expressId: cp.entityId,  // DrawingPolygon uses entityId
+        expressId: cp.entityId,
       }));
 
-      // Include linework from the generated drawing on the section plane overlay.
       const lines: DrawingLine2D[] = drawing2D.lines
         .filter((line) => showHiddenLines || line.visibility !== 'hidden')
         .map((line) => ({
@@ -119,22 +107,21 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
           category: line.category,
         }));
 
-      // Upload to renderer - will be drawn on the section plane
-      // Pass sectionRange to match exactly what render() uses for section plane position
       renderer.uploadSection2DOverlay(
         polygons,
         lines,
-        sectionPlane.axis,
-        sectionPlane.position,
-        sectionRangeRef.current ?? undefined,  // Same range as section plane
+        sectionPlane.normal,
+        sectionPlane.distance,
         sectionPlane.flipped
       );
     } else {
-      // Clear overlay when not in section mode, no drawing, or overlay disabled
       renderer.clearSection2DOverlay();
     }
 
-    // Re-render to show/hide overlay
+    const sectionOpts = (activeTool === 'section' && sectionPlane.enabled)
+      ? sectionPlane
+      : undefined;
+
     renderer.render({
       hiddenIds: hiddenEntitiesRef.current,
       isolatedIds: isolatedEntitiesRef.current,
@@ -143,18 +130,18 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
       selectedModelIndex: selectedModelIndexRef.current,
       clearColor: clearColorRef.current,
       visualEnhancement: visualEnhancementRef.current,
-      sectionPlane: activeTool === 'section' ? {
-        ...sectionPlane,
-        min: sectionRangeRef.current?.min,
-        max: sectionRangeRef.current?.max,
-      } : undefined,
+      sectionPlane: sectionOpts,
     });
-  }, [drawing2D, activeTool, sectionPlane, isInitialized, coordinateInfo, show3DOverlay, showHiddenLines]);
+  }, [drawing2D, activeTool, sectionPlane, isInitialized, show3DOverlay, showHiddenLines]);
 
   // Re-render when visibility, selection, or section plane changes
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer || !isInitialized) return;
+
+    const sectionOpts = (activeTool === 'section' && sectionPlane.enabled)
+      ? sectionPlane
+      : undefined;
 
     renderer.render({
       hiddenIds: hiddenEntities,
@@ -164,14 +151,9 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
       selectedModelIndex,
       clearColor: clearColorRef.current,
       visualEnhancement: visualEnhancementRef.current,
-      sectionPlane: activeTool === 'section' ? {
-        ...sectionPlane,
-        min: sectionRange?.min,
-        max: sectionRange?.max,
-      } : undefined,
-      buildingRotation: coordinateInfo?.buildingRotation,
+      sectionPlane: sectionOpts,
     });
-  }, [hiddenEntities, isolatedEntities, selectedEntityId, selectedEntityIds, selectedModelIndex, isInitialized, sectionPlane, activeTool, sectionRange, coordinateInfo?.buildingRotation]);
+  }, [hiddenEntities, isolatedEntities, selectedEntityId, selectedEntityIds, selectedModelIndex, isInitialized, sectionPlane, activeTool]);
 }
 
 export default useRenderUpdates;

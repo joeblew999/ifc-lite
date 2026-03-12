@@ -11,16 +11,13 @@
  */
 
 export interface Section2DOverlayOptions {
-  axis: 'down' | 'front' | 'side';  // Semantic axis: down (Y), front (Z), side (X)
-  position: number; // 0-100 percentage
+  normal: { x: number; y: number; z: number };
+  distance: number;
   bounds: {
     min: { x: number; y: number; z: number };
     max: { x: number; y: number; z: number };
   };
   viewProj: Float32Array;
-  flipped?: boolean;
-  min?: number;  // Optional override for min range
-  max?: number;  // Optional override for max range
 }
 
 export interface CutPolygon2D {
@@ -478,24 +475,15 @@ export class Section2DOverlayRenderer {
       return;
     }
 
-    const { axis, viewProj } = options;
+    const { normal, viewProj } = options;
 
-    // Fixed offset to render overlay clearly above the section plane
-    // Use 0.3m offset for clear visibility at any camera angle
-    const offsetAmount = 0.3;  // 0.3m offset in world units
-    let offset: [number, number, number] = [0, 0, 0];
-
-    switch (axis) {
-      case 'down':
-        offset = [0, offsetAmount, 0];  // Y axis
-        break;
-      case 'front':
-        offset = [0, 0, offsetAmount];  // Z axis
-        break;
-      case 'side':
-        offset = [offsetAmount, 0, 0];  // X axis
-        break;
-    }
+    // Fixed offset along plane normal to render overlay clearly above the section plane
+    const offsetAmount = 0.3;
+    const offset: [number, number, number] = [
+      normal.x * offsetAmount,
+      normal.y * offsetAmount,
+      normal.z * offsetAmount,
+    ];
 
     // Update uniforms
     const uniforms = new Float32Array(20);

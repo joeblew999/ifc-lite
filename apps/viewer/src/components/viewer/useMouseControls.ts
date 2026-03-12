@@ -55,7 +55,6 @@ export interface UseMouseControlsParams {
 
   // Section/geometry refs
   sectionPlaneRef: MutableRefObject<SectionPlane>;
-  sectionRangeRef: MutableRefObject<{ min: number; max: number } | null>;
   geometryRef: MutableRefObject<MeshData[] | null>;
 
   // Measure raycast refs
@@ -107,6 +106,7 @@ export interface UseMouseControlsParams {
   calculateScale: () => void;
   getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null };
   hasPendingMeasurements: () => boolean;
+  setSectionPlaneFromFace: (normal: { x: number; y: number; z: number }, point: { x: number; y: number; z: number }) => void;
 
   // Constants
   HOVER_SNAP_THROTTLE_MS: number;
@@ -187,7 +187,6 @@ export function useMouseControls(params: UseMouseControlsParams): void {
     selectedModelIndexRef,
     clearColorRef,
     sectionPlaneRef,
-    sectionRangeRef,
     geometryRef,
     measureRaycastPendingRef,
     measureRaycastFrameRef,
@@ -221,6 +220,7 @@ export function useMouseControls(params: UseMouseControlsParams): void {
     calculateScale,
     getPickOptions,
     hasPendingMeasurements,
+    setSectionPlaneFromFace,
     HOVER_SNAP_THROTTLE_MS,
     SLOW_RAYCAST_THRESHOLD_MS,
     hoverThrottleMs,
@@ -717,11 +717,9 @@ export function useMouseControls(params: UseMouseControlsParams): void {
             selectedModelIndex: selectedModelIndexRef.current,
             clearColor: clearColorRef.current,
             isInteracting: true,
-            sectionPlane: activeToolRef.current === 'section' ? {
-              ...sectionPlaneRef.current,
-              min: sectionRangeRef.current?.min,
-              max: sectionRangeRef.current?.max,
-            } : undefined,
+            sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+              ? sectionPlaneRef.current
+              : undefined,
           });
           // Update ViewCube rotation in real-time during drag
           updateCameraRotationRealtime(camera.getRotation());
@@ -741,11 +739,9 @@ export function useMouseControls(params: UseMouseControlsParams): void {
               selectedModelIndex: selectedModelIndexRef.current,
               clearColor: clearColorRef.current,
               isInteracting: true,
-              sectionPlane: activeToolRef.current === 'section' ? {
-                ...sectionPlaneRef.current,
-                min: sectionRangeRef.current?.min,
-                max: sectionRangeRef.current?.max,
-              } : undefined,
+              sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+                ? sectionPlaneRef.current
+                : undefined,
             });
             updateCameraRotationRealtime(camera.getRotation());
             calculateScale();
@@ -913,11 +909,9 @@ export function useMouseControls(params: UseMouseControlsParams): void {
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
           isInteracting: true,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
         calculateScale();
       } else if (!renderPendingRef.current) {
@@ -934,11 +928,9 @@ export function useMouseControls(params: UseMouseControlsParams): void {
             selectedModelIndex: selectedModelIndexRef.current,
             clearColor: clearColorRef.current,
             isInteracting: true,
-            sectionPlane: activeToolRef.current === 'section' ? {
-              ...sectionPlaneRef.current,
-              min: sectionRangeRef.current?.min,
-              max: sectionRangeRef.current?.max,
-            } : undefined,
+            sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+              ? sectionPlaneRef.current
+              : undefined,
           });
           calculateScale();
         });
@@ -985,6 +977,18 @@ export function useMouseControls(params: UseMouseControlsParams): void {
       // Measure tool now uses drag interaction (see mousedown/mousemove/mouseup)
       if (tool === 'measure') {
         return; // Skip click handling for measure tool
+      }
+
+      // Section tool: click a face to define the cutting plane
+      if (tool === 'section') {
+        const result = renderer.raycastScene(x, y, {
+          hiddenIds: hiddenEntitiesRef.current,
+          isolatedIds: isolatedEntitiesRef.current,
+        });
+        if (result?.intersection) {
+          setSectionPlaneFromFace(result.intersection.normal, result.intersection.point);
+        }
+        return;
       }
 
       const now = Date.now();

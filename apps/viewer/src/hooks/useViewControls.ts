@@ -5,9 +5,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Drawing2D, DrawingSheet } from '@ifc-lite/drawing-2d';
 
+/** Map an arbitrary plane normal to the dominant geometric axis for 2D projection */
+function dominantSectionAxis(normal: { x: number; y: number; z: number }): 'down' | 'front' | 'side' {
+  const absX = Math.abs(normal.x), absY = Math.abs(normal.y), absZ = Math.abs(normal.z);
+  if (absY >= absX && absY >= absZ) return 'down';
+  if (absZ >= absX) return 'front';
+  return 'side';
+}
+
 interface UseViewControlsParams {
   drawing: Drawing2D | null;
-  sectionPlane: { axis: 'down' | 'front' | 'side'; position: number; flipped: boolean };
+  sectionPlane: { normal: { x: number; y: number; z: number }; distance: number; flipped: boolean };
   containerRef: React.RefObject<HTMLDivElement | null>;
   panelVisible: boolean;
   status: string;
@@ -41,8 +49,8 @@ function useViewControls({
   cachedSheetTransformRef,
 }: UseViewControlsParams): UseViewControlsResult {
   const [viewTransform, setViewTransform] = useState({ x: 0, y: 0, scale: 1 });
-  const [needsFit, setNeedsFit] = useState(true); // Force fit on first open and axis change
-  const prevAxisRef = useRef(sectionPlane.axis); // Track axis changes
+  const [needsFit, setNeedsFit] = useState(true); // Force fit on first open and normal change
+  const prevNormalRef = useRef(sectionPlane.normal); // Track normal changes
 
   // Wheel zoom handler
   useEffect(() => {
@@ -137,7 +145,7 @@ function useViewControls({
     // - 'down' (plan view): no Y flip
     // - 'front'/'side': Y flip
     // - 'side': X flip
-    const currentAxis = sectionPlane.axis;
+    const currentAxis = dominantSectionAxis(sectionPlane.normal);
     const flipY = currentAxis !== 'down';
     const flipX = currentAxis === 'side';
 
@@ -153,19 +161,21 @@ function useViewControls({
       x: rect.width / 2 - adjustedCenterX * scale,
       y: rect.height / 2 - adjustedCenterY * scale,
     });
-  }, [drawing, sheetEnabled, activeSheet, sectionPlane.axis]);
+  }, [drawing, sheetEnabled, activeSheet, sectionPlane.normal]);
 
-  // Track axis changes for forced fit-to-view
-  const lastFitAxisRef = useRef(sectionPlane.axis);
+  // Track normal changes for forced fit-to-view
+  const lastFitNormalRef = useRef(sectionPlane.normal);
 
-  // Set needsFit when axis changes
+  // Set needsFit when normal changes (different dominant axis)
   useEffect(() => {
-    if (sectionPlane.axis !== prevAxisRef.current) {
-      prevAxisRef.current = sectionPlane.axis;
-      setNeedsFit(true); // Force fit when axis changes
+    const prevAxis = dominantSectionAxis(prevNormalRef.current);
+    const curAxis = dominantSectionAxis(sectionPlane.normal);
+    if (curAxis !== prevAxis) {
+      prevNormalRef.current = sectionPlane.normal;
+      setNeedsFit(true); // Force fit when dominant axis changes
       cachedSheetTransformRef.current = null; // Clear cached transform for new axis
     }
-  }, [sectionPlane.axis]);
+  }, [sectionPlane.normal]);
 
   // Track previous sheet mode to detect toggle
   const prevSheetEnabledRef = useRef(sheetEnabled);
@@ -188,14 +198,16 @@ function useViewControls({
   // Also re-run when panelVisible changes so we fit when panel opens with existing drawing
   useEffect(() => {
     if (status === 'ready' && drawing && containerRef.current && panelVisible) {
-      const axisChanged = lastFitAxisRef.current !== sectionPlane.axis;
+      const curAxis = dominantSectionAxis(sectionPlane.normal);
+      const lastAxis = dominantSectionAxis(lastFitNormalRef.current);
+      const axisChanged = curAxis !== lastAxis;
 
       // Fit if needsFit (first open/axis change) OR if not pinned OR if axis just changed
       if (needsFit || !isPinned || axisChanged) {
         // Small delay to ensure canvas is rendered
         const timeout = setTimeout(() => {
           fitToView();
-          lastFitAxisRef.current = sectionPlane.axis;
+          lastFitNormalRef.current = sectionPlane.normal;
           if (needsFit) {
             setNeedsFit(false); // Clear the flag after fitting
           }
@@ -203,7 +215,7 @@ function useViewControls({
         return () => clearTimeout(timeout);
       }
     }
-  }, [status, drawing, fitToView, isPinned, needsFit, sectionPlane.axis, panelVisible]);
+  }, [status, drawing, fitToView, isPinned, needsFit, sectionPlane.normal, panelVisible]);
 
   return {
     viewTransform,

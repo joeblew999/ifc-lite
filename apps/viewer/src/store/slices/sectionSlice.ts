@@ -4,10 +4,14 @@
 
 /**
  * Section plane state slice
+ *
+ * Face-based section cutting: the user picks any face in 3D and
+ * the model is clipped by that face's plane (normal + distance).
+ * No axis presets — every section is defined by an arbitrary plane.
  */
 
 import type { StateCreator } from 'zustand';
-import type { SectionPlane, SectionPlaneAxis } from '../types.js';
+import type { SectionPlane } from '../types.js';
 import { SECTION_PLANE_DEFAULTS } from '../constants.js';
 
 export interface SectionSlice {
@@ -15,43 +19,59 @@ export interface SectionSlice {
   sectionPlane: SectionPlane;
 
   // Actions
-  setSectionPlaneAxis: (axis: SectionPlaneAxis) => void;
-  setSectionPlanePosition: (position: number) => void;
+  setSectionPlane: (plane: Partial<SectionPlane>) => void;
+  setSectionPlaneFromFace: (normal: { x: number; y: number; z: number }, point: { x: number; y: number; z: number }) => void;
+  setSectionPlaneDistance: (distance: number) => void;
   toggleSectionPlane: () => void;
   flipSectionPlane: () => void;
   resetSectionPlane: () => void;
 }
 
-const getDefaultSectionPlane = (): SectionPlane => ({
-  axis: SECTION_PLANE_DEFAULTS.AXIS,
-  position: SECTION_PLANE_DEFAULTS.POSITION,
-  enabled: SECTION_PLANE_DEFAULTS.ENABLED,
-  flipped: SECTION_PLANE_DEFAULTS.FLIPPED,
-});
+const getDefaultSectionPlane = (): SectionPlane => ({ ...SECTION_PLANE_DEFAULTS });
 
 export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice> = (set) => ({
   // Initial state
   sectionPlane: getDefaultSectionPlane(),
 
   // Actions
-  setSectionPlaneAxis: (axis) => set((state) => ({
-    sectionPlane: { ...state.sectionPlane, axis },
+  setSectionPlane: (update) => set((state) => ({
+    sectionPlane: { ...state.sectionPlane, ...update },
   })),
 
-  setSectionPlanePosition: (position) => set((state) => {
-    // Clamp position to valid range [0, 100]
-    const clampedPosition = Math.min(100, Math.max(0, Number(position) || 0));
+  /** Set section plane from a clicked face: derive plane from face normal + point on face */
+  setSectionPlaneFromFace: (normal, point) => set(() => {
+    // Plane distance = dot(normal, point) — signed distance from origin
+    const distance = normal.x * point.x + normal.y * point.y + normal.z * point.z;
     return {
-      sectionPlane: { ...state.sectionPlane, position: clampedPosition },
+      sectionPlane: {
+        normal: { x: normal.x, y: normal.y, z: normal.z },
+        distance,
+        enabled: true,
+        flipped: false,
+      },
     };
   }),
+
+  setSectionPlaneDistance: (distance) => set((state) => ({
+    sectionPlane: { ...state.sectionPlane, distance },
+  })),
 
   toggleSectionPlane: () => set((state) => ({
     sectionPlane: { ...state.sectionPlane, enabled: !state.sectionPlane.enabled },
   })),
 
   flipSectionPlane: () => set((state) => ({
-    sectionPlane: { ...state.sectionPlane, flipped: !state.sectionPlane.flipped },
+    sectionPlane: {
+      ...state.sectionPlane,
+      flipped: !state.sectionPlane.flipped,
+      // Flip = negate normal and distance
+      normal: {
+        x: -state.sectionPlane.normal.x,
+        y: -state.sectionPlane.normal.y,
+        z: -state.sectionPlane.normal.z,
+      },
+      distance: -state.sectionPlane.distance,
+    },
   })),
 
   resetSectionPlane: () => set({ sectionPlane: getDefaultSectionPlane() }),

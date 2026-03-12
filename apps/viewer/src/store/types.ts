@@ -83,15 +83,14 @@ export interface EdgeLockState {
 // Section Plane Types
 // ============================================================================
 
-/** Semantic axis names: down (Y), front (Z), side (X) for intuitive user experience */
-export type SectionPlaneAxis = 'down' | 'front' | 'side';
-
+/** Face-based section plane: arbitrary normal + signed distance from origin */
 export interface SectionPlane {
-  axis: SectionPlaneAxis;
-  /** 0-100 percentage of model bounds */
-  position: number;
+  /** Plane normal (unit vector) */
+  normal: { x: number; y: number; z: number };
+  /** Signed distance from world origin: dot(normal, pointOnPlane) */
+  distance: number;
   enabled: boolean;
-  /** If true, show the opposite side of the cut */
+  /** If true, the normal has been negated (cut from opposite side) */
   flipped: boolean;
 }
 

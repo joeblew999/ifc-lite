@@ -32,7 +32,6 @@ export interface UseKeyboardControlsParams {
   clearColorRef: MutableRefObject<[number, number, number, number]>;
   activeToolRef: MutableRefObject<string>;
   sectionPlaneRef: MutableRefObject<SectionPlane>;
-  sectionRangeRef: MutableRefObject<{ min: number; max: number } | null>;
   updateCameraRotationRealtime: (rotation: { azimuth: number; elevation: number }) => void;
   calculateScale: () => void;
 }
@@ -53,7 +52,6 @@ export function useKeyboardControls(params: UseKeyboardControlsParams): void {
     clearColorRef,
     activeToolRef,
     sectionPlaneRef,
-    sectionRangeRef,
     updateCameraRotationRealtime,
     calculateScale,
   } = params;
@@ -98,11 +96,9 @@ export function useKeyboardControls(params: UseKeyboardControlsParams): void {
           selectedId: selectedEntityIdRef.current,
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
         updateCameraRotationRealtime(camera.getRotation());
         calculateScale();
@@ -193,11 +189,9 @@ export function useKeyboardControls(params: UseKeyboardControlsParams): void {
           selectedId: selectedEntityIdRef.current,
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
       }
       moveFrameId = requestAnimationFrame(keyboardMove);

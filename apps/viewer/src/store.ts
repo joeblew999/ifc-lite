@@ -29,7 +29,6 @@ export type {
   Measurement,
   ActiveMeasurement,
   EdgeLockState,
-  SectionPlaneAxis,
   SectionPlane,
   HoverState,
   ContextMenuState,

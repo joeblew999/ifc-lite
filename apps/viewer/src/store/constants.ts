@@ -22,14 +22,14 @@ export const CAMERA_DEFAULTS = {
 // ============================================================================
 
 export const SECTION_PLANE_DEFAULTS = {
-  /** Default section plane axis */
-  AXIS: 'down' as const,
-  /** Default section plane position (percentage of model bounds) */
-  POSITION: 50,
+  /** Default normal: horizontal cut looking down (Y-up) */
+  normal: { x: 0, y: 1, z: 0 },
+  /** Default distance: 0 (origin) — will be set when user picks a face */
+  distance: 0,
   /** Default enabled state */
-  ENABLED: true,
+  enabled: false,
   /** Default flipped state */
-  FLIPPED: false,
+  flipped: false,
 } as const;
 
 // ============================================================================

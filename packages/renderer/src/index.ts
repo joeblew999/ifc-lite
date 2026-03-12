@@ -414,15 +414,13 @@ export class Renderer {
             const selectedIds = options.selectedIds;
             const selectedModelIndex = options.selectedModelIndex;
 
-            // Calculate section plane parameters and model bounds
-            // Always calculate bounds when sectionPlane is provided (for preview and active mode)
+            // Section plane parameters — arbitrary normal + distance, provided directly
             let sectionPlaneData: { normal: [number, number, number]; distance: number; enabled: boolean } | undefined;
             if (options.sectionPlane) {
-                // Get model bounds from ALL geometry sources: individual meshes AND batched meshes
+                // Compute model bounds for section plane visual (grid quad)
                 const boundsMin = { x: Infinity, y: Infinity, z: Infinity };
                 const boundsMax = { x: -Infinity, y: -Infinity, z: -Infinity };
 
-                // Check individual meshes
                 for (const mesh of meshes) {
                     if (mesh.bounds) {
                         boundsMin.x = Math.min(boundsMin.x, mesh.bounds.min[0]);
@@ -433,8 +431,6 @@ export class Renderer {
                         boundsMax.z = Math.max(boundsMax.z, mesh.bounds.max[2]);
                     }
                 }
-
-                // Check batched meshes (most geometry is here!)
                 const batchedMeshes = this.scene.getBatchedMeshes();
                 for (const batch of batchedMeshes) {
                     if (batch.bounds) {
@@ -446,56 +442,19 @@ export class Renderer {
                         boundsMax.z = Math.max(boundsMax.z, batch.bounds.max[2]);
                     }
                 }
-
-                // Fallback if no bounds found
                 if (!Number.isFinite(boundsMin.x)) {
                     boundsMin.x = boundsMin.y = boundsMin.z = -100;
                     boundsMax.x = boundsMax.y = boundsMax.z = 100;
                 }
-
-                // Store bounds for section plane visual
                 this.geometryManager.setModelBounds({ min: boundsMin, max: boundsMax });
 
-                // Only calculate clipping data if section is enabled
                 if (options.sectionPlane.enabled) {
-                    // Calculate plane normal based on semantic axis
-                    // down = Y axis (horizontal cut), front = Z axis, side = X axis
-                    let normal: [number, number, number] = [0, 0, 0];
-                    if (options.sectionPlane.axis === 'side') normal[0] = 1;        // X axis
-                    else if (options.sectionPlane.axis === 'down') normal[1] = 1;   // Y axis (horizontal)
-                    else normal[2] = 1;                                              // Z axis (front)
-
-                    // Apply building rotation if present (rotate normal around Y axis)
-                    // Building rotation is in X-Y plane (Z is up in IFC, Y is up in WebGL)
-                    if (options.buildingRotation !== undefined && options.buildingRotation !== 0) {
-                        const cosR = Math.cos(options.buildingRotation);
-                        const sinR = Math.sin(options.buildingRotation);
-                        // Rotate normal vector around Y axis (vertical)
-                        // For X-Z plane rotation: x' = x*cos - z*sin, z' = x*sin + z*cos, y' = y
-                        const x = normal[0];
-                        const z = normal[2];
-                        normal[0] = x * cosR - z * sinR;
-                        normal[2] = x * sinR + z * cosR;
-                        // Normalize to maintain unit length
-                        const len = Math.sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
-                        if (len > 0.0001) {
-                            normal[0] /= len;
-                            normal[1] /= len;
-                            normal[2] /= len;
-                        }
-                    }
-
-                    // Get axis-specific range based on semantic axis
-                    // Use min/max overrides from sectionPlane if provided (storey-based range)
-                    const axisIdx = options.sectionPlane.axis === 'side' ? 'x' : options.sectionPlane.axis === 'down' ? 'y' : 'z';
-                    const minVal = options.sectionPlane.min ?? boundsMin[axisIdx];
-                    const maxVal = options.sectionPlane.max ?? boundsMax[axisIdx];
-
-                    // Calculate plane distance from position percentage
-                    const range = maxVal - minVal;
-                    const distance = minVal + (options.sectionPlane.position / 100) * range;
-
-                    sectionPlaneData = { normal, distance, enabled: true };
+                    const n = options.sectionPlane.normal;
+                    sectionPlaneData = {
+                        normal: [n.x, n.y, n.z],
+                        distance: options.sectionPlane.distance,
+                        enabled: true,
+                    };
                 }
             }
 
@@ -969,33 +928,29 @@ export class Renderer {
             }
 
             // Draw section plane visual BEFORE pass.end() (within same MSAA render pass)
-            // Always show plane when sectionPlane options are provided (as preview or active)
             const modelBounds = this.geometryManager.getModelBounds();
             if (options.sectionPlane && this.sectionPlaneRenderer && modelBounds) {
+                const sp = options.sectionPlane;
                 this.sectionPlaneRenderer.draw(
                     pass,
                     {
-                        axis: options.sectionPlane.axis,
-                        position: options.sectionPlane.position,
+                        normal: sp.normal,
+                        distance: sp.distance,
                         bounds: modelBounds,
                         viewProj,
-                        isPreview: !options.sectionPlane.enabled, // Preview mode when not enabled
-                        min: options.sectionPlane.min,
-                        max: options.sectionPlane.max,
+                        isPreview: !sp.enabled,
                     }
                 );
 
                 // Draw 2D section overlay on the section plane (when section is active, not preview)
-                if (options.sectionPlane.enabled && this.section2DOverlayRenderer?.hasGeometry()) {
+                if (sp.enabled && this.section2DOverlayRenderer?.hasGeometry()) {
                     this.section2DOverlayRenderer.draw(
                         pass,
                         {
-                            axis: options.sectionPlane.axis,
-                            position: options.sectionPlane.position,
+                            normal: sp.normal,
+                            distance: sp.distance,
                             bounds: modelBounds,
                             viewProj,
-                            min: options.sectionPlane.min,
-                            max: options.sectionPlane.max,
                         }
                     );
                 }
@@ -1128,36 +1083,27 @@ export class Renderer {
     }
 
     /**
-     * Upload 2D section drawing data for 3D overlay rendering
-     * Call this when a 2D drawing is generated to display it on the section plane
-     * Uses same position calculation as section plane: sectionRange min/max if provided, else modelBounds
+     * Upload 2D section drawing data for 3D overlay rendering.
+     * For face-based sections, the caller provides the arbitrary plane normal + distance.
+     * The overlay renderer determines the dominant axis to map 2D coordinates to 3D.
      */
     uploadSection2DOverlay(
         polygons: CutPolygon2D[],
         lines: DrawingLine2D[],
-        axis: 'down' | 'front' | 'side',
-        position: number,  // 0-100 percentage
-        sectionRange?: { min?: number; max?: number },  // Same storey-based range as section plane
+        normal: { x: number; y: number; z: number },
+        distance: number,
         flipped: boolean = false
     ): void {
         if (!this.section2DOverlayRenderer) return;
 
-        // Use EXACTLY same calculation as section plane in render() method:
-        // minVal = options.sectionPlane.min ?? boundsMin[axisIdx]
-        // maxVal = options.sectionPlane.max ?? boundsMax[axisIdx]
-        const axisIdx = axis === 'side' ? 'x' : axis === 'down' ? 'y' : 'z';
+        // Determine dominant axis from normal for 2D → 3D mapping
+        const absX = Math.abs(normal.x), absY = Math.abs(normal.y), absZ = Math.abs(normal.z);
+        let axis: 'down' | 'front' | 'side';
+        if (absY >= absX && absY >= absZ) axis = 'down';
+        else if (absZ >= absX) axis = 'front';
+        else axis = 'side';
 
-        const modelBounds = this.geometryManager.getModelBounds();
-
-        // Allow upload if either sectionRange has both values, or modelBounds exists as fallback
-        const hasFullRange = sectionRange?.min !== undefined && sectionRange?.max !== undefined;
-        if (!hasFullRange && !modelBounds) return;
-
-        const minVal = sectionRange?.min ?? modelBounds!.min[axisIdx];
-        const maxVal = sectionRange?.max ?? modelBounds!.max[axisIdx];
-        const planePosition = minVal + (position / 100) * (maxVal - minVal);
-
-        this.section2DOverlayRenderer.uploadDrawing(polygons, lines, axis, planePosition, flipped);
+        this.section2DOverlayRenderer.uploadDrawing(polygons, lines, axis, distance, flipped);
     }
 
     /**

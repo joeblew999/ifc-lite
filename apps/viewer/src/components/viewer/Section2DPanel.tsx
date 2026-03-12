@@ -36,6 +36,14 @@ import { useAnnotation2D } from '@/hooks/useAnnotation2D';
 import { useViewControls } from '@/hooks/useViewControls';
 import { useDrawingExport } from '@/hooks/useDrawingExport';
 
+/** Derive semantic axis from arbitrary plane normal */
+function dominantSectionAxis(n: { x: number; y: number; z: number }): 'down' | 'front' | 'side' {
+  const absX = Math.abs(n.x), absY = Math.abs(n.y), absZ = Math.abs(n.z);
+  if (absY >= absX && absY >= absZ) return 'down';
+  if (absZ >= absX) return 'front';
+  return 'side';
+}
+
 interface Section2DPanelProps {
   mergedGeometry?: GeometryResult | null;
   computedIsolatedIds?: Set<number> | null;
@@ -271,7 +279,7 @@ export function Section2DPanel({
   });
 
   const measureHandlers = useMeasure2D({
-    drawing, viewTransform, setViewTransform, sectionAxis: sectionPlane.axis, containerRef,
+    drawing, viewTransform, setViewTransform, sectionAxis: dominantSectionAxis(sectionPlane.normal), containerRef,
     measure2DMode, measure2DStart, measure2DCurrent,
     measure2DShiftLocked, measure2DLockedAxis,
     setMeasure2DStart, setMeasure2DCurrent, setMeasure2DShiftLocked,
@@ -279,7 +287,7 @@ export function Section2DPanel({
   });
 
   const annotationHandlers = useAnnotation2D({
-    drawing, viewTransform, sectionAxis: sectionPlane.axis, containerRef,
+    drawing, viewTransform, sectionAxis: dominantSectionAxis(sectionPlane.normal), containerRef,
     activeTool: annotation2DActiveTool, setActiveTool: setAnnotation2DActiveTool,
     polygonArea2DPoints, addPolygonArea2DPoint, completePolygonArea2D, cancelPolygonArea2D,
     textAnnotations2D, addTextAnnotation2D, setTextAnnotation2DEditing,
@@ -836,7 +844,7 @@ export function Section2DPanel({
               measureSnapPoint={measure2DSnapPoint}
               sheetEnabled={sheetEnabled}
               activeSheet={activeSheet}
-              sectionAxis={sectionPlane.axis}
+              sectionAxis={dominantSectionAxis(sectionPlane.normal)}
               isPinned={isPinned}
               cachedSheetTransformRef={cachedSheetTransformRef}
               annotation2DActiveTool={annotation2DActiveTool}
@@ -863,8 +871,9 @@ export function Section2DPanel({
         {textAnnotation2DEditing && (() => {
           const editingAnnotation = textAnnotations2D.find((a) => a.id === textAnnotation2DEditing);
           if (!editingAnnotation) return null;
-          const scaleX = sectionPlane.axis === 'side' ? -viewTransform.scale : viewTransform.scale;
-          const scaleY = sectionPlane.axis === 'down' ? viewTransform.scale : -viewTransform.scale;
+          const sAxis = dominantSectionAxis(sectionPlane.normal);
+          const scaleX = sAxis === 'side' ? -viewTransform.scale : viewTransform.scale;
+          const scaleY = sAxis === 'down' ? viewTransform.scale : -viewTransform.scale;
           const screenX = editingAnnotation.position.x * scaleX + viewTransform.x;
           const screenY = editingAnnotation.position.y * scaleY + viewTransform.y;
           return (

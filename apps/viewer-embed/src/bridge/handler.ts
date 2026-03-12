@@ -255,16 +255,26 @@ async function handleCommand(type: InboundCommandType, data: unknown, requestId?
 
     case 'SET_SECTION': {
       const payload = data as InboundPayloads['SET_SECTION'];
-      if (payload.axis !== undefined) state.setSectionPlaneAxis(payload.axis as SectionAxis);
-      if (payload.position !== undefined) state.setSectionPlanePosition(payload.position);
+      // Convert SDK axis+position to normal+distance
+      const update: Partial<{ normal: { x: number; y: number; z: number }; distance: number; enabled: boolean; flipped: boolean }> = {};
+      if (payload.axis !== undefined) {
+        const axisNormals: Record<string, { x: number; y: number; z: number }> = {
+          down: { x: 0, y: 1, z: 0 },
+          front: { x: 0, y: 0, z: 1 },
+          side: { x: 1, y: 0, z: 0 },
+        };
+        update.normal = axisNormals[payload.axis] ?? { x: 0, y: 1, z: 0 };
+      }
+      if (payload.position !== undefined) {
+        update.distance = payload.position;
+      }
       if (payload.enabled !== undefined) {
-        const current = state.sectionPlane.enabled;
-        if (current !== payload.enabled) state.toggleSectionPlane();
+        update.enabled = payload.enabled;
       }
       if (payload.flipped !== undefined) {
-        const current = state.sectionPlane.flipped;
-        if (current !== payload.flipped) state.flipSectionPlane();
+        update.flipped = payload.flipped;
       }
+      state.setSectionPlane(update);
       if (requestId) emitToParent(createResponse(requestId));
       return;
     }

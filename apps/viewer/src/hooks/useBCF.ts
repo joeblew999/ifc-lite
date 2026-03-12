@@ -110,10 +110,7 @@ export function useBCF(options: UseBCFOptions = {}): UseBCFResult {
   const isolatedEntities = useViewerStore((s) => s.isolatedEntities);
   const selectedEntityId = useViewerStore((s) => s.selectedEntityId);
   const selectedEntityIds = useViewerStore((s) => s.selectedEntityIds);
-  const setSectionPlaneAxis = useViewerStore((s) => s.setSectionPlaneAxis);
-  const setSectionPlanePosition = useViewerStore((s) => s.setSectionPlanePosition);
-  const toggleSectionPlane = useViewerStore((s) => s.toggleSectionPlane);
-  const flipSectionPlane = useViewerStore((s) => s.flipSectionPlane);
+  const setSectionPlane = useViewerStore((s) => s.setSectionPlane);
 
   // Selection and visibility actions
   const setSelectedEntityId = useViewerStore((s) => s.setSelectedEntityId);
@@ -294,8 +291,8 @@ export function useBCF(options: UseBCFOptions = {}): UseBCFResult {
       // Convert section plane state
       const viewerSectionPlane: ViewerSectionPlane | undefined = sectionPlane.enabled
         ? {
-            axis: sectionPlane.axis,
-            position: sectionPlane.position,
+            normal: sectionPlane.normal,
+            distance: sectionPlane.distance,
             enabled: true,
             flipped: sectionPlane.flipped,
           }
@@ -411,21 +408,12 @@ export function useBCF(options: UseBCFOptions = {}): UseBCFResult {
 
       // Apply section plane
       if (viewpointSectionPlane) {
-        // Set axis and position
-        setSectionPlaneAxis(viewpointSectionPlane.axis);
-        setSectionPlanePosition(viewpointSectionPlane.position);
-
-        // Toggle enabled state if needed
-        const currentEnabled = sectionPlane.enabled;
-        if (viewpointSectionPlane.enabled !== currentEnabled) {
-          toggleSectionPlane();
-        }
-
-        // Toggle flip state if needed
-        const currentFlipped = sectionPlane.flipped;
-        if (viewpointSectionPlane.flipped !== currentFlipped) {
-          flipSectionPlane();
-        }
+        setSectionPlane({
+          normal: viewpointSectionPlane.normal,
+          distance: viewpointSectionPlane.distance,
+          enabled: viewpointSectionPlane.enabled,
+          flipped: viewpointSectionPlane.flipped,
+        });
       }
 
       // Apply selection from BCF components
@@ -489,11 +477,7 @@ export function useBCF(options: UseBCFOptions = {}): UseBCFResult {
     [
       getRenderer,
       getBounds,
-      sectionPlane,
-      setSectionPlaneAxis,
-      setSectionPlanePosition,
-      toggleSectionPlane,
-      flipSectionPlane,
+      setSectionPlane,
       globalIdToExpressId,
       setSelectedEntityId,
       setHiddenEntities,

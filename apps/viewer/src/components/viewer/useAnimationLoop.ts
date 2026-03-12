@@ -26,7 +26,6 @@ export interface UseAnimationLoopParams {
   clearColorRef: MutableRefObject<[number, number, number, number]>;
   visualEnhancementRef: MutableRefObject<VisualEnhancementOptions>;
   sectionPlaneRef: MutableRefObject<SectionPlane>;
-  sectionRangeRef: MutableRefObject<{ min: number; max: number } | null>;
   lastCameraStateRef: MutableRefObject<{
     position: { x: number; y: number; z: number };
     rotation: { azimuth: number; elevation: number };
@@ -56,7 +55,6 @@ export function useAnimationLoop(params: UseAnimationLoopParams): void {
     clearColorRef,
     visualEnhancementRef,
     sectionPlaneRef,
-    sectionRangeRef,
     lastCameraStateRef,
     updateCameraRotationRealtime,
     calculateScale,
@@ -90,11 +88,9 @@ export function useAnimationLoop(params: UseAnimationLoopParams): void {
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
           visualEnhancement: visualEnhancementRef.current,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
         // Update ViewCube during camera animation (e.g., preset view transitions)
         updateCameraRotationRealtime(camera.getRotation());

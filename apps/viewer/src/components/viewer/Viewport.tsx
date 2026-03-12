@@ -239,20 +239,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
   // IFC data state
   const { ifcDataStore } = useIfcDataState();
 
-  // Calculate section plane range based on actual geometry bounds for current axis
-  const sectionRange = useMemo(() => {
-    if (!coordinateInfo?.shiftedBounds) return null;
-
-    const bounds = coordinateInfo.shiftedBounds;
-
-    // Map semantic axis to coordinate axis
-    const axisKey = sectionPlane.axis === 'side' ? 'x' : sectionPlane.axis === 'down' ? 'y' : 'z';
-
-    const min = bounds.min[axisKey];
-    const max = bounds.max[axisKey];
-
-    return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
-  }, [coordinateInfo, sectionPlane.axis]);
+  // Section range is no longer needed — the plane is defined by normal + distance directly.
 
   // Theme-aware clear color ref (updated when theme changes)
   // Tokyo Night storm: #1a1b26 = rgb(26, 27, 38)
@@ -353,7 +340,6 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
   const edgeLockStateRef = useRef(edgeLockState);
   const measurementConstraintEdgeRef = useRef(measurementConstraintEdge);
   const sectionPlaneRef = useRef(sectionPlane);
-  const sectionRangeRef = useRef<{ min: number; max: number } | null>(null);
   const geometryRef = useRef<MeshData[] | null>(geometry);
 
   // Hover throttling
@@ -402,7 +388,6 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
   useEffect(() => { edgeLockStateRef.current = edgeLockState; }, [edgeLockState]);
   useEffect(() => { measurementConstraintEdgeRef.current = measurementConstraintEdge; }, [measurementConstraintEdge]);
   useEffect(() => { sectionPlaneRef.current = sectionPlane; }, [sectionPlane]);
-  useEffect(() => { sectionRangeRef.current = sectionRange; }, [sectionRange]);
   useEffect(() => { visualEnhancementRef.current = visualEnhancement; }, [visualEnhancement]);
   useEffect(() => {
     geometryRef.current = geometry;
@@ -527,11 +512,9 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
           visualEnhancement: visualEnhancementRef.current,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
       };
 
@@ -706,7 +689,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     selectedModelIndexRef,
     clearColorRef,
     sectionPlaneRef,
-    sectionRangeRef,
+
     geometryRef,
     measureRaycastPendingRef,
     measureRaycastFrameRef,
@@ -740,6 +723,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     calculateScale,
     getPickOptions,
     hasPendingMeasurements,
+    setSectionPlaneFromFace: (normal, point) => useViewerStore.getState().setSectionPlaneFromFace(normal, point),
     HOVER_SNAP_THROTTLE_MS,
     SLOW_RAYCAST_THRESHOLD_MS,
     hoverThrottleMs,
@@ -760,7 +744,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     selectedModelIndexRef,
     clearColorRef,
     sectionPlaneRef,
-    sectionRangeRef,
+
     geometryRef,
     handlePickForSelection: (pickResult) => handlePickForSelectionRef.current(pickResult),
     getPickOptions,
@@ -781,7 +765,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     clearColorRef,
     activeToolRef,
     sectionPlaneRef,
-    sectionRangeRef,
+
     updateCameraRotationRealtime,
     calculateScale,
   });
@@ -800,7 +784,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     selectedModelIndexRef,
     clearColorRef,
     sectionPlaneRef,
-    sectionRangeRef,
+
     visualEnhancementRef,
     lastCameraStateRef,
     updateCameraRotationRealtime,
@@ -837,15 +821,13 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     selectedModelIndex,
     activeTool,
     sectionPlane,
-    sectionRange,
-    coordinateInfo,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     selectedEntityIdsRef,
     sectionPlaneRef,
-    sectionRangeRef,
+
     activeToolRef,
     drawing2D,
     show3DOverlay,

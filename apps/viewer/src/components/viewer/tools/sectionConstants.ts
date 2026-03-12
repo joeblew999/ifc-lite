@@ -3,12 +3,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 /**
- * Shared constants for section tool components
+ * Shared constants for the face-based section tool.
  */
 
-// Axis display info for semantic names
-export const AXIS_INFO = {
-  down: { label: 'Down', description: 'Horizontal cut (floor plan view)', icon: '\u2193' },
-  front: { label: 'Front', description: 'Vertical cut (elevation view)', icon: '\u2192' },
-  side: { label: 'Side', description: 'Vertical cut (side elevation)', icon: '\u2299' },
-} as const;
+/** Section plane color (light blue) */
+export const SECTION_COLOR = '#03A9F4';

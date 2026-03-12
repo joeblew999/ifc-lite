@@ -20,8 +20,7 @@ interface StoreyInfo {
 
 export function useFloorplanView() {
   const { models, ifcDataStore } = useIfc();
-  const setSectionPlaneAxis = useViewerStore((s) => s.setSectionPlaneAxis);
-  const setSectionPlanePosition = useViewerStore((s) => s.setSectionPlanePosition);
+  const setSectionPlane = useViewerStore((s) => s.setSectionPlane);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
   const cameraCallbacks = useViewerStore((s) => s.cameraCallbacks);
   const setProjectionMode = useViewerStore((s) => s.setProjectionMode);
@@ -65,44 +64,21 @@ export function useFloorplanView() {
 
   // Activate a floorplan view at the given storey elevation
   const activateFloorplan = useCallback((storey: StoreyInfo) => {
-    // 1. Calculate section position as percentage of Y bounds
-    // Section cut at 1.2m above floor level (standard architectural practice)
+    // Standard architectural cut: 1.2m above floor
     const cutHeight = storey.elevation + 1.2;
 
-    // Find Y bounds from all models using coordinateInfo (pre-computed AABB)
-    let yMin = Infinity;
-    let yMax = -Infinity;
-    if (models.size > 0) {
-      for (const [, model] of models) {
-        const bounds = model.geometryResult?.coordinateInfo?.shiftedBounds;
-        if (bounds) {
-          yMin = Math.min(yMin, bounds.min.y);
-          yMax = Math.max(yMax, bounds.max.y);
-        }
-      }
-    }
+    // Set section plane: horizontal cut at cutHeight (Y-up normal, distance = cutHeight)
+    setSectionPlane({
+      normal: { x: 0, y: 1, z: 0 },
+      distance: cutHeight,
+      enabled: true,
+      flipped: false,
+    });
 
-    // Fallback bounds if no coordinate info available
-    if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
-      yMin = -10;
-      yMax = 50;
-    }
-
-    // Convert to 0-100 percentage
-    const range = yMax - yMin;
-    const percentage = range > 0 ? ((cutHeight - yMin) / range) * 100 : 50;
-
-    // 2. Set section plane: axis=down (Y), position=calculated, enabled
-    setSectionPlaneAxis('down');
-    setSectionPlanePosition(Math.max(0, Math.min(100, percentage)));
     setActiveTool('section');
-
-    // 3. Switch to orthographic projection
     setProjectionMode('orthographic');
-
-    // 4. Set camera to top-down view
     cameraCallbacks.setPresetView?.('top');
-  }, [models, setSectionPlaneAxis, setSectionPlanePosition, setActiveTool, setProjectionMode, cameraCallbacks]);
+  }, [setSectionPlane, setActiveTool, setProjectionMode, cameraCallbacks]);
 
   return { availableStoreys, activateFloorplan };
 }

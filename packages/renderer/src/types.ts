@@ -90,16 +90,14 @@ export interface BatchedMesh {
   bounds?: { min: [number, number, number]; max: [number, number, number] };
 }
 
-// Section plane for clipping
-// Semantic axis names: down (Y), front (Z), side (X) for intuitive user experience
-export type SectionPlaneAxis = 'down' | 'front' | 'side';
+// Section plane for clipping — arbitrary plane defined by normal + distance
 export interface SectionPlane {
-  axis: SectionPlaneAxis;
-  position: number; // 0-100 percentage of model bounds
+  /** Plane normal (unit vector) */
+  normal: { x: number; y: number; z: number };
+  /** Signed distance from world origin: dot(normal, pointOnPlane) */
+  distance: number;
   enabled: boolean;
-  flipped?: boolean; // If true, show the opposite side of the cut
-  min?: number;      // Optional override for min range value
-  max?: number;      // Optional override for max range value
+  flipped?: boolean;
 }
 
 export type ContactShadingQuality = 'off' | 'low' | 'high';

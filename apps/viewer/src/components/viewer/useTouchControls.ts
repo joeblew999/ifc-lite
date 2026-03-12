@@ -35,7 +35,6 @@ export interface UseTouchControlsParams {
   selectedModelIndexRef: MutableRefObject<number | undefined>;
   clearColorRef: MutableRefObject<[number, number, number, number]>;
   sectionPlaneRef: MutableRefObject<SectionPlane>;
-  sectionRangeRef: MutableRefObject<{ min: number; max: number } | null>;
   geometryRef: MutableRefObject<MeshData[] | null>;
   handlePickForSelection: (pickResult: PickResult | null) => void;
   getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null };
@@ -54,7 +53,6 @@ export function useTouchControls(params: UseTouchControlsParams): void {
     selectedModelIndexRef,
     clearColorRef,
     sectionPlaneRef,
-    sectionRangeRef,
     geometryRef,
     handlePickForSelection,
     getPickOptions,
@@ -151,11 +149,9 @@ export function useTouchControls(params: UseTouchControlsParams): void {
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
           isInteracting: true,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
       } else if (touchState.touches.length === 2) {
         const dx1 = touchState.touches[1].clientX - touchState.touches[0].clientX;
@@ -181,11 +177,9 @@ export function useTouchControls(params: UseTouchControlsParams): void {
           selectedModelIndex: selectedModelIndexRef.current,
           clearColor: clearColorRef.current,
           isInteracting: true,
-          sectionPlane: activeToolRef.current === 'section' ? {
-            ...sectionPlaneRef.current,
-            min: sectionRangeRef.current?.min,
-            max: sectionRangeRef.current?.max,
-          } : undefined,
+          sectionPlane: (activeToolRef.current === 'section' && sectionPlaneRef.current.enabled)
+            ? sectionPlaneRef.current
+            : undefined,
         });
       }
     };
