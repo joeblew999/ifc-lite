@@ -10,8 +10,8 @@
  * - Axis indicator badge
  * - Visual feedback during drag (color, scale)
  *
- * The gizmo is positioned at the right edge of the viewport, vertically centered.
- * Dragging up/down adjusts the section plane position along its axis.
+ * Only the small gizmo hit-area captures pointer events.
+ * The rest of the SVG is pointer-events:none so orbiting still works.
  */
 
 import React, { useCallback, useEffect } from 'react';
@@ -42,10 +42,7 @@ export function SectionPlaneVisualization() {
       updateGizmoDrag(e.clientY, sensitivity);
     };
 
-    const handleUp = () => {
-      endGizmoDrag();
-    };
-
+    const handleUp = () => endGizmoDrag();
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') endGizmoDrag();
     };
@@ -73,8 +70,12 @@ export function SectionPlaneVisualization() {
     ? 'FACE'
     : AXIS_INFO[sectionPlane.axis].label.toUpperCase();
 
-  // Arrow direction: Down axis = vertical (pointing up/down), Front/Side = rotated 90 degrees
+  // Arrow direction: Down axis = vertical, Front/Side = horizontal
   const isVertical = sectionPlane.mode === 'face' || sectionPlane.axis === 'down';
+
+  // Fixed pixel positions for the gizmo handle
+  const gizmoX = isVertical ? 'calc(100% - 36px)' : '50%';
+  const gizmoY = isVertical ? '50%' : 'calc(100% - 36px)';
 
   return (
     <svg
@@ -94,7 +95,7 @@ export function SectionPlaneVisualization() {
         </filter>
       </defs>
 
-      {/* Axis badge (top-left corner) */}
+      {/* Axis badge (top-left corner) — NO pointer events */}
       <g transform="translate(24, 24)">
         <rect
           x="2" y="2" width="36" height="36" rx="8"
@@ -122,90 +123,101 @@ export function SectionPlaneVisualization() {
         )}
       </g>
 
-      {/* Gizmo handle (right edge, vertically centered) */}
-      <g style={{ pointerEvents: 'auto' }}>
-        {/* Position the gizmo: for vertical axes it's on the right edge;
-            for horizontal axes (front/side) it's at the bottom-center */}
-        <g
-          transform={isVertical
-            ? 'translate(calc(100% - 36), 50%)'
-            : 'translate(50%, calc(100% - 36))'
-          }
+      {/* Gizmo handle — ONLY the handle itself captures pointer events.
+          Everything else is pointer-events:none so orbiting works normally. */}
+      <foreignObject x="0" y="0" width="100%" height="100%" style={{ pointerEvents: 'none', overflow: 'visible' }}>
+        <div
           style={{
-            transform: isVertical
-              ? 'translate(calc(100% - 36px), calc(50%))'
-              : 'translate(calc(50%), calc(100% - 36px))',
+            position: 'absolute',
+            left: gizmoX,
+            top: gizmoY,
+            transform: 'translate(-50%, -50%)',
+            pointerEvents: 'none',
           }}
         >
-          <g
+          <svg
+            width="72" height="72"
+            viewBox="-36 -36 72 72"
             style={{
+              overflow: 'visible',
+              pointerEvents: 'none',
               cursor: dragging ? 'grabbing' : 'grab',
-              transform: isVertical ? 'rotate(0deg)' : 'rotate(90deg)',
-              transformOrigin: '0 0',
             }}
-            onPointerDown={handlePointerDown}
           >
-            {/* Invisible hit area */}
-            <rect x="-18" y="-44" width="36" height="88" fill="transparent" />
+            {/* Rotated group for horizontal axes */}
+            <g transform={isVertical ? '' : 'rotate(90)'}>
+              {/* Invisible hit area — THIS captures pointer events */}
+              <rect
+                x="-18" y="-44" width="36" height="88"
+                fill="transparent"
+                style={{ pointerEvents: 'auto', cursor: dragging ? 'grabbing' : 'grab' }}
+                onPointerDown={handlePointerDown}
+              />
 
-            {/* Arrow shaft */}
-            <line
-              x1="0" y1="-28" x2="0" y2="28"
-              stroke={color}
-              strokeWidth={dragging ? 3.5 : 2.5}
-              strokeLinecap="round"
-              filter="url(#gizmo-glow)"
-              opacity={dragging ? 1 : 0.7}
-            />
-
-            {/* Top arrowhead */}
-            <polygon
-              points="0,-36 -7,-24 7,-24"
-              fill={color}
-              filter="url(#gizmo-glow)"
-              opacity={dragging ? 1 : 0.7}
-            />
-
-            {/* Bottom arrowhead */}
-            <polygon
-              points="0,36 -7,24 7,24"
-              fill={color}
-              filter="url(#gizmo-glow)"
-              opacity={dragging ? 1 : 0.7}
-            />
-
-            {/* Center handle dot */}
-            <circle
-              cx="0" cy="0"
-              r={dragging ? 9 : 7}
-              fill={color}
-              stroke="white"
-              strokeWidth="2"
-              filter="url(#gizmo-shadow)"
-            />
-
-            {/* Drag feedback ring */}
-            {dragging && (
-              <circle
-                cx="0" cy="0" r="14"
-                fill="none"
+              {/* Arrow shaft */}
+              <line
+                x1="0" y1="-28" x2="0" y2="28"
                 stroke={color}
-                strokeWidth="1.5"
-                strokeDasharray="3 3"
-                opacity={0.5}
-              >
-                <animateTransform
-                  attributeName="transform"
-                  type="rotate"
-                  from="0 0 0" to="360 0 0"
-                  dur="2s"
-                  repeatCount="indefinite"
-                />
-              </circle>
-            )}
-          </g>
-        </g>
-      </g>
+                strokeWidth={dragging ? 3.5 : 2.5}
+                strokeLinecap="round"
+                filter="url(#gizmo-glow)"
+                opacity={dragging ? 1 : 0.7}
+                style={{ pointerEvents: 'none' }}
+              />
+
+              {/* Top arrowhead */}
+              <polygon
+                points="0,-36 -7,-24 7,-24"
+                fill={color}
+                filter="url(#gizmo-glow)"
+                opacity={dragging ? 1 : 0.7}
+                style={{ pointerEvents: 'none' }}
+              />
+
+              {/* Bottom arrowhead */}
+              <polygon
+                points="0,36 -7,24 7,24"
+                fill={color}
+                filter="url(#gizmo-glow)"
+                opacity={dragging ? 1 : 0.7}
+                style={{ pointerEvents: 'none' }}
+              />
+
+              {/* Center handle dot */}
+              <circle
+                cx="0" cy="0"
+                r={dragging ? 9 : 7}
+                fill={color}
+                stroke="white"
+                strokeWidth="2"
+                filter="url(#gizmo-shadow)"
+                style={{ pointerEvents: 'none' }}
+              />
+
+              {/* Drag feedback ring */}
+              {dragging && (
+                <circle
+                  cx="0" cy="0" r="14"
+                  fill="none"
+                  stroke={color}
+                  strokeWidth="1.5"
+                  strokeDasharray="3 3"
+                  opacity={0.5}
+                  style={{ pointerEvents: 'none' }}
+                >
+                  <animateTransform
+                    attributeName="transform"
+                    type="rotate"
+                    from="0 0 0" to="360 0 0"
+                    dur="2s"
+                    repeatCount="indefinite"
+                  />
+                </circle>
+              )}
+            </g>
+          </svg>
+        </div>
+      </foreignObject>
     </svg>
   );
 }

@@ -5,12 +5,14 @@
 /**
  * Render updates hook for the 3D viewport
  *
- * Single source of truth for triggering re-renders when visibility, selection,
- * section plane, hover, or theme state changes. Consolidates all render calls
- * to avoid competing effects that cause flickering.
+ * Single consolidated effect for triggering re-renders when visibility,
+ * selection, section plane, hover, or theme state changes.
+ *
+ * CRITICAL: Only ONE render call per state change to avoid flickering.
+ * The 2D overlay upload and the 3D render happen in the same effect.
  */
 
-import { useEffect, useCallback, type MutableRefObject } from 'react';
+import { useEffect, type MutableRefObject } from 'react';
 import type { Renderer, CutPolygon2D, DrawingLine2D, VisualEnhancementOptions } from '@ifc-lite/renderer';
 import type { CoordinateInfo } from '@ifc-lite/geometry';
 import type { Drawing2D } from '@ifc-lite/drawing-2d';
@@ -37,7 +39,7 @@ export interface UseRenderUpdatesParams {
   sectionRange: { min: number; max: number } | null;
   coordinateInfo?: CoordinateInfo;
 
-  // Refs for theme re-render
+  // Refs for animation-loop renders (not used here, kept for interface compat)
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
   isolatedEntitiesRef: MutableRefObject<Set<number> | null>;
   selectedEntityIdRef: MutableRefObject<number | null>;
@@ -54,8 +56,9 @@ export interface UseRenderUpdatesParams {
 }
 
 /**
- * Build the section plane render option from current state.
+ * Build the section plane render option.
  * Returns undefined when the section tool is not active.
+ * Only passes axis-mode data to the renderer (face mode is not yet supported in the renderer).
  */
 function buildSectionOption(
   activeTool: string,
@@ -64,11 +67,15 @@ function buildSectionOption(
 ): import('@ifc-lite/renderer').SectionPlane | undefined {
   if (activeTool !== 'section') return undefined;
 
-  // Face mode: the renderer still uses the standard axis/position interface,
-  // but the normal/distance are computed from the face data inside the renderer.
-  // We pass the face data through the existing section plane options.
+  // Face mode: renderer doesn't understand arbitrary normals yet.
+  // Only pass section data when in axis mode.
+  if (sectionPlane.mode === 'face') return undefined;
+
   return {
-    ...sectionPlane,
+    axis: sectionPlane.axis,
+    position: sectionPlane.position,
+    enabled: sectionPlane.enabled,
+    flipped: sectionPlane.flipped,
     min: sectionRange?.min,
     max: sectionRange?.max,
   };
@@ -90,53 +97,27 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
     sectionPlane,
     sectionRange,
     coordinateInfo,
-    hiddenEntitiesRef,
-    isolatedEntitiesRef,
-    selectedEntityIdRef,
-    selectedModelIndexRef,
-    selectedEntityIdsRef,
     sectionPlaneRef,
     sectionRangeRef,
-    activeToolRef,
     drawing2D,
     show3DOverlay,
     showHiddenLines,
   } = params;
 
-  // Helper: perform a render with current state
-  const doRender = useCallback(() => {
-    const renderer = rendererRef.current;
-    if (!renderer || !isInitialized) return;
-
-    renderer.render({
-      hiddenIds: hiddenEntitiesRef.current,
-      isolatedIds: isolatedEntitiesRef.current,
-      selectedId: selectedEntityIdRef.current,
-      selectedIds: selectedEntityIdsRef.current,
-      selectedModelIndex: selectedModelIndexRef.current,
-      clearColor: clearColorRef.current,
-      visualEnhancement: visualEnhancementRef.current,
-      sectionPlane: buildSectionOption(
-        activeToolRef.current,
-        sectionPlaneRef.current,
-        sectionRangeRef.current,
-      ),
-      buildingRotation: coordinateInfo?.buildingRotation,
-    });
-  }, [isInitialized, coordinateInfo?.buildingRotation]);
-
-  // Theme-aware clear color update
+  // Theme-aware clear color update (separate effect — theme changes are rare)
   useEffect(() => {
     clearColorRef.current = getThemeClearColor(theme as 'light' | 'dark');
-    doRender();
-  }, [theme, doRender]);
+  }, [theme]);
 
-  // 2D section overlay: upload drawing data to renderer when available
+  // SINGLE consolidated render effect.
+  // Handles: visibility, selection, section plane, drawing overlay, theme.
+  // Only ONE renderer.render() call per state change — no flickering.
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer || !isInitialized) return;
 
-    if (activeTool === 'section' && drawing2D && drawing2D.cutPolygons.length > 0 && show3DOverlay) {
+    // Step 1: Update 2D section overlay if needed
+    if (activeTool === 'section' && sectionPlane.mode === 'axis' && drawing2D && drawing2D.cutPolygons.length > 0 && show3DOverlay) {
       const polygons: CutPolygon2D[] = drawing2D.cutPolygons.map((cp) => ({
         polygon: cp.polygon,
         ifcType: cp.ifcType,
@@ -162,14 +143,20 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
       renderer.clearSection2DOverlay();
     }
 
-    doRender();
-  }, [drawing2D, activeTool, sectionPlane, isInitialized, coordinateInfo, show3DOverlay, showHiddenLines, doRender]);
-
-  // Re-render when visibility, selection, or section plane changes.
-  // This is the single consolidated effect — no competing render calls.
-  useEffect(() => {
-    doRender();
+    // Step 2: Single render call
+    renderer.render({
+      hiddenIds: hiddenEntities,
+      isolatedIds: isolatedEntities,
+      selectedId: selectedEntityId,
+      selectedIds: selectedEntityIds,
+      selectedModelIndex,
+      clearColor: clearColorRef.current,
+      visualEnhancement: visualEnhancementRef.current,
+      sectionPlane: buildSectionOption(activeTool, sectionPlane, sectionRange),
+      buildingRotation: coordinateInfo?.buildingRotation,
+    });
   }, [
+    // All reactive dependencies — any change triggers exactly ONE render
     hiddenEntities,
     isolatedEntities,
     selectedEntityId,
@@ -180,7 +167,10 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
     activeTool,
     sectionRange,
     coordinateInfo?.buildingRotation,
-    doRender,
+    theme,
+    drawing2D,
+    show3DOverlay,
+    showHiddenLines,
   ]);
 }
 

@@ -42,15 +42,20 @@ export interface UseAnimationLoopParams {
   hasPendingMeasurements: () => boolean;
 }
 
-/** Build section render option from refs */
+/** Build section render option from refs (axis mode only — face mode not yet in renderer) */
 function buildSectionOption(
   activeToolRef: MutableRefObject<string>,
   sectionPlaneRef: MutableRefObject<SectionPlane>,
   sectionRangeRef: MutableRefObject<{ min: number; max: number } | null>,
 ) {
   if (activeToolRef.current !== 'section') return undefined;
+  const sp = sectionPlaneRef.current;
+  if (sp.mode === 'face') return undefined;
   return {
-    ...sectionPlaneRef.current,
+    axis: sp.axis,
+    position: sp.position,
+    enabled: sp.enabled,
+    flipped: sp.flipped,
     min: sectionRangeRef.current?.min,
     max: sectionRangeRef.current?.max,
   };
