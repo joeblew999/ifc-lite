@@ -143,11 +143,16 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
       renderer.clearSection2DOverlay();
     }
 
-    // Step 2: Single render call
+    // Step 2: Update persistent section state on the renderer.
+    // This ensures ALL subsequent renders (streaming, color updates, animation loop)
+    // respect section clipping even if they don't pass sectionPlane in options.
     const sectionOpt = buildSectionOption(activeTool, sectionPlane, sectionRange);
+    renderer.setSectionPlane(sectionOpt, coordinateInfo?.buildingRotation);
     if (sectionOpt) {
       console.debug('[RenderUpdates] section →', sectionOpt.axis, 'pos=' + sectionOpt.position, 'en=' + sectionOpt.enabled, 'range=', sectionOpt.min, sectionOpt.max);
     }
+
+    // Step 3: Single render call
     renderer.render({
       hiddenIds: hiddenEntities,
       isolatedIds: isolatedEntities,
