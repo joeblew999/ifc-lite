@@ -2,7 +2,10 @@
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="description" content="Embeddable IFC 3D model viewer">
+  <meta name="color-scheme" content="dark light">
   <title>IFC-Lite Embed</title>
   <style>
     /* Minimal inline styles - no Tailwind dependency for the shell */
@@ -11,6 +14,8 @@
     body { font-family: system-ui, -apple-system, sans-serif; }
     html.dark body { background: #1a1b26; color: #a9b1d6; }
     html.light body, html:not(.dark) body { background: #ffffff; color: #1a1b26; }
+    /* Ensure the 3D canvas fills the viewport (Tailwind utilities may not be generated for embed build) */
+    #root canvas { width: 100% !important; height: 100% !important; display: block !important; }
   </style>
 </head>
 <body>

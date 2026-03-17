@@ -13,18 +13,39 @@ import type { EmbedUrlParams, ViewPreset } from '@ifc-lite/embed-protocol';
 
 const VALID_VIEWS: ViewPreset[] = ['top', 'bottom', 'front', 'back', 'left', 'right'];
 
+const DEMO_MODELS: Record<string, string> = {
+  default: '/demo/AC20-FZK-Haus.ifc',
+};
+
 export function parseUrlParams(): EmbedUrlParams {
   const params = new URLSearchParams(window.location.search);
   const result: EmbedUrlParams = {};
 
+  const demo = params.get('demo');
+  if (demo !== null) {
+    const key = demo || 'default';
+    result.modelUrl = DEMO_MODELS[key] ?? DEMO_MODELS.default;
+  }
+
   const modelUrl = params.get('modelUrl');
-  if (modelUrl) result.modelUrl = modelUrl;
+  if (modelUrl) {
+    // Only allow http(s) URLs to prevent javascript: or data: injection
+    try {
+      const parsed = new URL(modelUrl, window.location.origin);
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        result.modelUrl = modelUrl;
+      }
+    } catch {
+      // Invalid URL, skip
+    }
+  }
 
   const theme = params.get('theme');
   if (theme === 'light' || theme === 'dark') result.theme = theme;
 
   const bg = params.get('bg');
-  if (bg) result.bg = bg;
+  // Only allow valid hex color characters (3, 6, or 8 hex digits)
+  if (bg && /^[0-9a-fA-F]{3,8}$/.test(bg)) result.bg = bg;
 
   const controls = params.get('controls');
   if (controls === 'orbit' || controls === 'pan' || controls === 'all' || controls === 'none') {
