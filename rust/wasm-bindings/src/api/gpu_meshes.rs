@@ -8,8 +8,9 @@
 //! and GPU-ready geometry generation.
 
 use super::styling::{
-    build_element_style_index, build_geometry_style_index, extract_building_rotation,
-    find_color_for_geometry, get_default_color_for_type,
+    build_element_material_styles_from_content, build_element_style_index,
+    build_geometry_style_index, extract_building_rotation, get_default_color_for_type,
+    resolve_submesh_color,
 };
 use super::GeometryStats;
 use super::IfcAPI;
@@ -52,6 +53,9 @@ impl IfcAPI {
         // Build style index: first map geometry IDs to colors, then map element IDs to colors
         let geometry_styles = build_geometry_style_index(&content, &mut decoder);
         let style_index = build_element_style_index(&content, &geometry_styles, &mut decoder);
+        // Build material-based styles for sub-element color fallback (windows, doors)
+        let element_material_styles =
+            build_element_material_styles_from_content(&content, &mut decoder);
 
         // OPTIMIZATION: Collect all FacetedBrep IDs for batch processing
         // Also build void relationship index (host → openings)
@@ -251,15 +255,20 @@ impl IfcAPI {
 
                     if has_submeshes {
                         let sub_meshes = sub_meshes_result.unwrap();
+                        let mat_colors = element_material_styles.get(&id);
+                        let mut mat_color_idx = 0usize;
+
                         for sub in sub_meshes.sub_meshes {
                             let mut mesh = sub.mesh;
-                            let color = find_color_for_geometry(
+                            let color = resolve_submesh_color(
                                 sub.geometry_id,
                                 &geometry_styles,
                                 &mut decoder,
-                            )
-                            .or_else(|| style_index.get(&id).copied())
-                            .unwrap_or(default_color);
+                                mat_colors,
+                                &mut mat_color_idx,
+                                style_index.get(&id).copied(),
+                                default_color,
+                            );
                             push_mesh_if_valid(&mut mesh, color);
                         }
                     } else {
@@ -1229,6 +1238,9 @@ impl IfcAPI {
                             if has_submeshes {
                                 // Use sub-meshes for multi-material elements (windows, doors, etc.)
                                 let sub_meshes = sub_meshes_result.unwrap();
+                                let mat_colors = pre_pass.element_material_styles.get(&id);
+                                let mut mat_color_idx = 0usize;
+
                                 for sub in sub_meshes.sub_meshes {
                                     let mut mesh = sub.mesh;
                                     if mesh.is_empty() {
@@ -1238,15 +1250,15 @@ impl IfcAPI {
                                         calculate_normals(&mut mesh);
                                     }
 
-                                    // Look up color by geometry item ID (resolving MappedItem chains),
-                                    // then by element color, then default
-                                    let color = find_color_for_geometry(
+                                    let color = resolve_submesh_color(
                                         sub.geometry_id,
                                         &pre_pass.geometry_styles,
                                         &mut decoder,
-                                    )
-                                    .or(element_color)
-                                    .unwrap_or(default_color);
+                                        mat_colors,
+                                        &mut mat_color_idx,
+                                        element_color,
+                                        default_color,
+                                    );
 
                                     total_vertices += mesh.positions.len() / 3;
                                     total_triangles += mesh.indices.len() / 3;
