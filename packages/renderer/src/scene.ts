@@ -252,6 +252,20 @@ export class Scene {
       .filter((piece): piece is MeshData => piece !== null);
   }
 
+  getMeshDataForExpressIds(expressIds: Iterable<number>, modelIndex?: number): MeshData[] {
+    const out: MeshData[] = [];
+    for (const expressId of expressIds) {
+      const pieces = this.getMeshDataPieces(expressId, modelIndex);
+      if (!pieces) continue;
+      for (const piece of pieces) out.push(piece);
+    }
+    return out;
+  }
+
+  getAllMeshDataPieces(modelIndex?: number): MeshData[] {
+    return this.getMeshDataForExpressIds(this.getAllMeshDataExpressIds(), modelIndex);
+  }
+
   private reconstructHugeMeshPiece(row: HugeGeometryElementRow): MeshData | null {
     const chunk = this.hugeChunkData.get(row.batchId);
     if (!chunk) return null;

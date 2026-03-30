@@ -23,6 +23,7 @@ import {
   type SectionConfig,
 } from '@ifc-lite/drawing-2d';
 import { GeometryProcessor, type GeometryResult } from '@ifc-lite/geometry';
+import { getGlobalRenderer } from './useBCF.js';
 
 // Axis conversion from semantic (down/front/side) to geometric (x/y/z)
 export const AXIS_MAP: Record<'down' | 'front' | 'side', 'x' | 'y' | 'z'> = {
@@ -85,7 +86,29 @@ export function useDrawingGeneration({
 
   // Generate drawing when panel opens
   const generateDrawing = useCallback(async (isRegenerate = false) => {
-    if (!geometryResult?.meshes || geometryResult.meshes.length === 0) {
+    const renderer = getGlobalRenderer();
+    const scene = renderer?.getScene();
+
+    let effectiveMeshes = geometryResult?.meshes ?? null;
+    if ((!effectiveMeshes || effectiveMeshes.length === 0) && scene?.isHugeGeometryMode()) {
+      const filteredIds = new Set<number>(scene.getAllMeshDataExpressIds());
+      if (combinedHiddenIds.size > 0) {
+        for (const hiddenId of combinedHiddenIds) filteredIds.delete(hiddenId);
+      }
+      if (combinedIsolatedIds !== null) {
+        for (const id of Array.from(filteredIds)) {
+          if (!combinedIsolatedIds.has(id)) filteredIds.delete(id);
+        }
+      }
+      if (computedIsolatedIds && computedIsolatedIds.size > 0) {
+        for (const id of Array.from(filteredIds)) {
+          if (!computedIsolatedIds.has(id)) filteredIds.delete(id);
+        }
+      }
+      effectiveMeshes = renderer?.getMeshDataForExpressIds(filteredIds) ?? [];
+    }
+
+    if (!effectiveMeshes || effectiveMeshes.length === 0) {
       // Clear the drawing when no geometry is available (e.g., all models hidden)
       setDrawing(null);
       setDrawingStatus('idle');
@@ -249,7 +272,13 @@ export function useDrawingGeneration({
       const axis = AXIS_MAP[sectionPlane.axis];
 
       // Calculate section position from percentage using coordinateInfo bounds
-      const bounds = geometryResult.coordinateInfo.shiftedBounds;
+      const bounds = geometryResult?.coordinateInfo.shiftedBounds;
+      if (!bounds) {
+        setDrawing(null);
+        setDrawingStatus('idle');
+        setDrawingError('No coordinate bounds available');
+        return;
+      }
 
       const axisMin = bounds.min[axis];
       const axisMax = bounds.max[axis];
@@ -276,7 +305,7 @@ export function useDrawingGeneration({
       config.plane.flipped = sectionPlane.flipped;
 
       // Filter meshes by visibility (respect 3D hiding/isolation)
-      let meshesToProcess = geometryResult.meshes;
+      let meshesToProcess = effectiveMeshes;
 
       // Filter out hidden entities (using combined multi-model set)
       if (combinedHiddenIds.size > 0) {
@@ -610,7 +639,7 @@ export function useDrawingGeneration({
     sectionRef.current = { axis: sectionPlane.axis, position: sectionPlane.position, flipped: sectionPlane.flipped };
 
     // If panel is visible OR 3D overlay is enabled, and we have geometry, regenerate INSTANTLY
-    if ((panelVisible || displayOptions.show3DOverlay) && geometryResult?.meshes) {
+    if ((panelVisible || displayOptions.show3DOverlay) && ((geometryResult?.meshes && geometryResult.meshes.length > 0) || getGlobalRenderer()?.getScene().isHugeGeometryMode())) {
       // Start immediately - no debounce
       // doRegenerate handles preventing overlaps and will auto-regenerate with latest when done
       doRegenerate();

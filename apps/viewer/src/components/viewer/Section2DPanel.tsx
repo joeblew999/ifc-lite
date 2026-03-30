@@ -36,6 +36,11 @@ import { useMeasure2D } from '@/hooks/useMeasure2D';
 import { useAnnotation2D } from '@/hooks/useAnnotation2D';
 import { useViewControls } from '@/hooks/useViewControls';
 import { useDrawingExport } from '@/hooks/useDrawingExport';
+import {
+  getGeometryEntityInfos,
+  hasGeometryLoaded,
+  hasModelGeometryLoaded,
+} from '@/utils/geometrySummary';
 
 interface Section2DPanelProps {
   mergedGeometry?: GeometryResult | null;
@@ -139,6 +144,9 @@ export function Section2DPanel({
   const sectionPlane = useViewerStore((s) => s.sectionPlane);
   const activeTool = useViewerStore((s) => s.activeTool);
   const models = useViewerStore((s) => s.models);
+  const hugeGeometryMode = useViewerStore((s) => s.hugeGeometryMode);
+  const hugeGeometryStats = useViewerStore((s) => s.hugeGeometryStats);
+  const hugeGeometryEntities = useViewerStore((s) => s.hugeGeometryEntities);
   const { geometryResult: legacyGeometryResult, ifcDataStore } = useIfc();
 
   // Use merged geometry from props if available (multi-model), otherwise fall back to legacy single-model
@@ -149,8 +157,11 @@ export function Section2DPanel({
   // ═══════════════════════════════════════════════════════════════════════════
   const prevActiveToolRef = useRef(activeTool);
   useEffect(() => {
+    const hasRenderableGeometry = models.size > 0
+      ? Array.from(models.values()).some(hasModelGeometryLoaded)
+      : hasGeometryLoaded(geometryResult, hugeGeometryStats);
     // Section tool was just activated
-    if (activeTool === 'section' && prevActiveToolRef.current !== 'section' && geometryResult?.meshes) {
+    if (activeTool === 'section' && prevActiveToolRef.current !== 'section' && hasRenderableGeometry) {
       if (suppressNextSection2DPanelAutoOpen) {
         setSuppressNextSection2DPanelAutoOpen(false);
         prevActiveToolRef.current = activeTool;
@@ -159,7 +170,7 @@ export function Section2DPanel({
       setDrawingPanelVisible(true);
     }
     prevActiveToolRef.current = activeTool;
-  }, [activeTool, geometryResult, setDrawingPanelVisible, suppressNextSection2DPanelAutoOpen, setSuppressNextSection2DPanelAutoOpen]);
+  }, [activeTool, geometryResult, hugeGeometryStats, models, setDrawingPanelVisible, suppressNextSection2DPanelAutoOpen, setSuppressNextSection2DPanelAutoOpen]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // LOCAL STATE
@@ -195,6 +206,26 @@ export function Section2DPanel({
   // Build entity color map from mesh material colors (for "Use IFC Materials" mode)
   const entityColorMap = useMemo(() => {
     const map = new Map<number, [number, number, number, number]>();
+    if (models.size > 0) {
+      for (const model of models.values()) {
+        for (const entity of getGeometryEntityInfos(model.geometryResult, model.hugeGeometryEntities)) {
+          if (entity.expressId && entity.color) {
+            map.set(entity.expressId, entity.color);
+          }
+        }
+      }
+      return map;
+    }
+
+    if (hugeGeometryMode) {
+      for (const entity of hugeGeometryEntities.values()) {
+        if (entity.expressId && entity.color) {
+          map.set(entity.expressId, entity.color);
+        }
+      }
+      return map;
+    }
+
     if (geometryResult?.meshes) {
       for (const mesh of geometryResult.meshes) {
         if (mesh.expressId && mesh.color) {
@@ -203,7 +234,7 @@ export function Section2DPanel({
       }
     }
     return map;
-  }, [geometryResult]);
+  }, [geometryResult, hugeGeometryEntities, hugeGeometryMode, models]);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // VISIBILITY STATE

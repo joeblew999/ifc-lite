@@ -152,7 +152,12 @@ export function LocationMap({ mapConversion, projectedCRS, coordinateInfo, geome
         glb,
         name: 'IFC Model',
       });
-      const blob = new Blob([kmz], { type: 'application/vnd.google-earth.kmz' });
+      const kmzBytes = kmz instanceof Uint8Array ? kmz : new Uint8Array(kmz);
+      const kmzBuffer = kmzBytes.buffer.slice(
+        kmzBytes.byteOffset,
+        kmzBytes.byteOffset + kmzBytes.byteLength,
+      ) as ArrayBuffer;
+      const blob = new Blob([kmzBuffer], { type: 'application/vnd.google-earth.kmz' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

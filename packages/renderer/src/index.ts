@@ -278,6 +278,14 @@ export class Renderer {
         return this.scene.getHugeEntityInfo(expressId);
     }
 
+    getAllMeshDataPieces(modelIndex?: number): MeshData[] {
+        return this.scene.getAllMeshDataPieces(modelIndex);
+    }
+
+    getMeshDataForExpressIds(expressIds: Iterable<number>, modelIndex?: number): MeshData[] {
+        return this.scene.getMeshDataForExpressIds(expressIds, modelIndex);
+    }
+
     /**
      * Fit camera to view all loaded geometry
      */
