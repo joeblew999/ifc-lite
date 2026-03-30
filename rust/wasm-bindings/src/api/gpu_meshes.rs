@@ -20,7 +20,7 @@ use crate::zero_copy::{
 };
 use js_sys::Function;
 use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::spawn_local;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 
 fn color_bucket_key(color: [f32; 4]) -> u64 {
     let r = (color[0].clamp(0.0, 1.0) * 255.0).round() as u64;
@@ -2002,6 +2002,7 @@ impl IfcAPI {
                                             super::set_js_prop(&progress, "processed", &(processed as f64).into());
                                             super::set_js_prop(&progress, "phase", &"simple".into());
                                             flush_bucket(bucket_key, &mut current_batches, &on_batch, &progress.into());
+                                            let _ = JsFuture::from(js_sys::Promise::resolve(&JsValue::UNDEFINED)).await;
                                         }
                                     }
                                 }
@@ -2018,7 +2019,7 @@ impl IfcAPI {
                     let progress = js_sys::Object::new();
                     super::set_js_prop(&progress, "phase", &"simple_complete".into());
                     flush_all_buckets(&mut current_batches, &on_batch, &progress.into());
-                    // yield removed — sync for speed
+                    let _ = JsFuture::from(js_sys::Promise::resolve(&JsValue::UNDEFINED)).await;
                 }
 
                 // Process deferred complex geometry
@@ -2111,6 +2112,7 @@ impl IfcAPI {
                                     super::set_js_prop(&progress, "total", &(total_elements as f64).into());
                                     super::set_js_prop(&progress, "phase", &"complex".into());
                                     flush_bucket(bucket_key, &mut current_batches, &on_batch, &progress.into());
+                                    let _ = JsFuture::from(js_sys::Promise::resolve(&JsValue::UNDEFINED)).await;
                                 }
                             }
                         }
@@ -2125,6 +2127,7 @@ impl IfcAPI {
                     super::set_js_prop(&progress, "percent", &100u32.into());
                     super::set_js_prop(&progress, "phase", &"complete".into());
                     flush_all_buckets(&mut current_batches, &on_batch, &progress.into());
+                    let _ = JsFuture::from(js_sys::Promise::resolve(&JsValue::UNDEFINED)).await;
                 }
 
                 // Call completion callback
