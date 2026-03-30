@@ -10,7 +10,7 @@
  */
 
 import type { IDSValidationReport } from '@ifc-lite/ids';
-import type { GeometryResult } from '@ifc-lite/geometry';
+import type { GeometryResult, HugeGeometryEntityInfo } from '@ifc-lite/geometry';
 import { toGlobalIdFromModels } from '../../store/globalId.js';
 
 /** RGBA color tuple in 0-1 range */
@@ -55,7 +55,8 @@ export function buildValidationColorUpdates(
   defaultFailedColor: ColorTuple,
   defaultPassedColor: ColorTuple,
   geometryResult: GeometryResult | null | undefined,
-  originalColors: Map<number, ColorTuple>
+  originalColors: Map<number, ColorTuple>,
+  hugeGeometryEntities?: Map<number, HugeGeometryEntityInfo> | null,
 ): Map<number, ColorTuple> {
   const colorUpdates = new Map<number, ColorTuple>();
 
@@ -78,6 +79,11 @@ export function buildValidationColorUpdates(
       if (globalIdsToUpdate.has(mesh.expressId)) {
         originalColors.set(mesh.expressId, [...mesh.color] as ColorTuple);
       }
+    }
+  } else if (hugeGeometryEntities && originalColors.size === 0) {
+    for (const [globalId, entity] of hugeGeometryEntities) {
+      if (!globalIdsToUpdate.has(globalId)) continue;
+      originalColors.set(globalId, [...entity.color] as ColorTuple);
     }
   }
 

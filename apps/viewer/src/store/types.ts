@@ -181,7 +181,7 @@ export interface CameraCallbacks {
 // ============================================================================
 
 import type { IfcDataStore } from '@ifc-lite/parser';
-import type { GeometryResult } from '@ifc-lite/geometry';
+import type { GeometryResult, HugeGeometryEntityInfo, HugeGeometryStats } from '@ifc-lite/geometry';
 
 /** Compound identifier for entities across multiple models */
 export interface EntityRef {
@@ -202,6 +202,12 @@ export interface FederatedModel {
   ifcDataStore: IfcDataStore;
   /** Pre-tessellated geometry (with globalIds, not original expressIds) */
   geometryResult: GeometryResult;
+  /** Metadata-first huge-geometry mode flag. */
+  hugeGeometryMode?: boolean;
+  /** Progressive geometry stats when huge-geometry mode is active. */
+  hugeGeometryStats?: HugeGeometryStats | null;
+  /** Per-entity metadata used before full CPU mesh ownership exists. */
+  hugeGeometryEntities?: Map<number, HugeGeometryEntityInfo>;
   /** Model-level visibility toggle */
   visible: boolean;
   /** UI collapse state in hierarchy panel */

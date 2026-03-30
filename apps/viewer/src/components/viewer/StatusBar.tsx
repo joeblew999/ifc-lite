@@ -9,12 +9,14 @@ import { formatNumber, formatBytes } from '@/lib/utils';
 import { useViewerStore } from '@/store';
 import { useIfc } from '@/hooks/useIfc';
 import { useWebGPU } from '@/hooks/useWebGPU';
+import { getGeometryElementCount, getGeometryTriangleCount } from '@/utils/geometrySummary';
 
 export function StatusBar() {
   const { loading, geometryResult, ifcDataStore } = useIfc();
   const progress = useViewerStore((s) => s.progress);
   const error = useViewerStore((s) => s.error);
   const selectedStoreys = useViewerStore((s) => s.selectedStoreys);
+  const hugeGeometryStats = useViewerStore((s) => s.hugeGeometryStats);
   const webgpu = useWebGPU();
 
   const [fps, setFps] = useState(60);
@@ -57,14 +59,11 @@ export function StatusBar() {
   }, []);
 
   const stats = useMemo(() => {
-    if (!geometryResult) {
-      return { elements: 0, triangles: 0 };
-    }
     return {
-      elements: geometryResult.meshes?.length ?? 0,
-      triangles: geometryResult.totalTriangles ?? 0,
+      elements: getGeometryElementCount(geometryResult, hugeGeometryStats),
+      triangles: getGeometryTriangleCount(geometryResult, hugeGeometryStats),
     };
-  }, [geometryResult]);
+  }, [geometryResult, hugeGeometryStats]);
 
   const visibleElements = useMemo(() => {
     if (selectedStoreys.size === 0 || !ifcDataStore?.spatialHierarchy) {

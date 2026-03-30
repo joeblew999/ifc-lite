@@ -7,7 +7,13 @@
  */
 
 import type { Mesh, InstancedMesh, BatchedMesh, Vec3 } from './types.js';
-import type { MeshData } from '@ifc-lite/geometry';
+import type {
+  MeshData,
+  HugeGeometryChunk,
+  HugeGeometryEntityInfo,
+  HugeGeometryElementRow,
+  HugeGeometryStats,
+} from '@ifc-lite/geometry';
 import { MathUtils } from './math.js';
 import type { RenderPipeline } from './pipeline.js';
 import { BATCH_CONSTANTS } from './constants.js';
@@ -68,6 +74,14 @@ export class Scene {
   // via queueMeshes() (instant, no GPU), and the animation loop drains
   // the queue via flushPending() with a per-frame time budget.
   private meshQueue: MeshData[] = [];
+
+  // ─── Metadata-first huge geometry mode ────────────────────────────────
+  private hugeGeometryMode: boolean = false;
+  private hugeBatchMap: Map<number, BatchedMesh> = new Map();
+  private hugeEntityRows: Map<number, HugeGeometryElementRow[]> = new Map();
+  private hugeEntityInfo: Map<number, HugeGeometryEntityInfo> = new Map();
+  private hugeEntityBatchIds: Map<number, number[]> = new Map();
+  private hugeGeometryStats: HugeGeometryStats | null = null;
 
   // ─── GPU-resident mode ──────────────────────────────────────────────
   // After releaseGeometryData(), JS-side typed arrays are freed.
@@ -387,6 +401,116 @@ export class Scene {
     this.meshQueue = [];
     this.appendToBatches(meshes, device, pipeline, true);
     return true;
+  }
+
+  appendHugeChunk(chunk: HugeGeometryChunk, device: GPUDevice, pipeline: RenderPipeline): void {
+    const existing = this.hugeBatchMap.get(chunk.batchId);
+    if (existing) {
+      existing.vertexBuffer.destroy();
+      existing.indexBuffer.destroy();
+      if (existing.uniformBuffer) existing.uniformBuffer.destroy();
+      const idx = this.batchedMeshes.indexOf(existing);
+      if (idx >= 0) this.batchedMeshes.splice(idx, 1);
+    }
+
+    const vertexBuffer = device.createBuffer({
+      size: chunk.vertexData.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(vertexBuffer, 0, chunk.vertexData);
+
+    const indexBuffer = device.createBuffer({
+      size: chunk.indexData.byteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(indexBuffer, 0, chunk.indexData);
+
+    const uniformBuffer = device.createBuffer({
+      size: pipeline.getUniformBufferSize(),
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(),
+      entries: [
+        {
+          binding: 0,
+          resource: { buffer: uniformBuffer },
+        },
+      ],
+    });
+
+    const expressIds = chunk.elements.map((element) => element.expressId);
+    const batchedMesh: BatchedMesh = {
+      colorKey: `huge:${chunk.batchId}`,
+      vertexBuffer,
+      indexBuffer,
+      indexCount: chunk.indexCount,
+      color: chunk.color,
+      expressIds,
+      bindGroup,
+      uniformBuffer,
+      bounds: {
+        min: chunk.boundsMin,
+        max: chunk.boundsMax,
+      },
+    };
+
+    this.hugeGeometryMode = true;
+    this.hugeBatchMap.set(chunk.batchId, batchedMesh);
+    this.batchedMeshes.push(batchedMesh);
+
+    for (const element of chunk.elements) {
+      let rows = this.hugeEntityRows.get(element.expressId);
+      if (!rows) {
+        rows = [];
+        this.hugeEntityRows.set(element.expressId, rows);
+      }
+      rows.push(element);
+
+      const batchIds = this.hugeEntityBatchIds.get(element.expressId) ?? [];
+      batchIds.push(chunk.batchId);
+      this.hugeEntityBatchIds.set(element.expressId, batchIds);
+
+      this.hugeEntityInfo.set(element.expressId, {
+        expressId: element.expressId,
+        ifcType: element.ifcType,
+        modelIndex: element.modelIndex,
+        color: element.color,
+        boundsMin: element.boundsMin,
+        boundsMax: element.boundsMax,
+      });
+      this.boundingBoxes.set(element.expressId, {
+        min: { x: element.boundsMin[0], y: element.boundsMin[1], z: element.boundsMin[2] },
+        max: { x: element.boundsMax[0], y: element.boundsMax[1], z: element.boundsMax[2] },
+      });
+    }
+
+    const triangleCount = chunk.indexCount / 3;
+    const vertexCount = chunk.vertexData.length / chunk.vertexStrideFloats;
+    const prevStats = this.hugeGeometryStats;
+    this.hugeGeometryStats = {
+      totalBatches: this.hugeBatchMap.size,
+      totalElements: this.hugeEntityInfo.size,
+      totalVertices: (prevStats?.totalVertices ?? 0) + vertexCount,
+      totalTriangles: (prevStats?.totalTriangles ?? 0) + triangleCount,
+    };
+  }
+
+  isHugeGeometryMode(): boolean {
+    return this.hugeGeometryMode;
+  }
+
+  getHugeGeometryStats(): HugeGeometryStats | null {
+    return this.hugeGeometryStats;
+  }
+
+  getHugeEntityInfo(expressId: number): HugeGeometryEntityInfo | null {
+    return this.hugeEntityInfo.get(expressId) ?? null;
+  }
+
+  getHugeEntityRows(expressId: number): HugeGeometryElementRow[] | undefined {
+    return this.hugeEntityRows.get(expressId);
   }
 
   /**
@@ -1315,12 +1439,37 @@ export class Scene {
     this.partialBatchCacheKeys.clear();
     this.meshQueue = [];
     this.geometryReleased = false;
+    this.hugeGeometryMode = false;
+    this.hugeBatchMap.clear();
+    this.hugeEntityRows.clear();
+    this.hugeEntityInfo.clear();
+    this.hugeEntityBatchIds.clear();
+    this.hugeGeometryStats = null;
   }
 
   /**
    * Calculate bounding box from actual mesh vertex data
    */
   getBounds(): { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null {
+    if (this.meshDataMap.size === 0 && this.boundingBoxes.size > 0) {
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+      for (const bbox of this.boundingBoxes.values()) {
+        if (bbox.min.x < minX) minX = bbox.min.x;
+        if (bbox.min.y < minY) minY = bbox.min.y;
+        if (bbox.min.z < minZ) minZ = bbox.min.z;
+        if (bbox.max.x > maxX) maxX = bbox.max.x;
+        if (bbox.max.y > maxY) maxY = bbox.max.y;
+        if (bbox.max.z > maxZ) maxZ = bbox.max.z;
+      }
+
+      return {
+        min: { x: minX, y: minY, z: minZ },
+        max: { x: maxX, y: maxY, z: maxZ },
+      };
+    }
+
     // When geometry data is released, compute bounds from cached bounding boxes
     if (this.geometryReleased) {
       if (this.boundingBoxes.size === 0) return null;
@@ -1383,6 +1532,9 @@ export class Scene {
    * After geometry release, returns expressIds from the cached bounding boxes.
    */
   getAllMeshDataExpressIds(): number[] {
+    if (this.hugeEntityInfo.size > 0) {
+      return Array.from(this.hugeEntityInfo.keys());
+    }
     if (this.geometryReleased) {
       return Array.from(this.boundingBoxes.keys());
     }

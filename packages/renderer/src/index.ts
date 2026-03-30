@@ -49,7 +49,7 @@ import { Picker } from './picker.js';
 import { MathUtils } from './math.js';
 import { FrustumUtils } from '@ifc-lite/spatial';
 import { deduplicateMeshes } from '@ifc-lite/geometry';
-import type { MeshData } from '@ifc-lite/geometry';
+import type { MeshData, HugeGeometryChunk, HugeGeometryEntityInfo, HugeGeometryStats } from '@ifc-lite/geometry';
 import type {
     RenderOptions,
     PickOptions,
@@ -237,6 +237,45 @@ export class Renderer {
 
         // Update camera scene bounds for tight orthographic near/far planes
         this.camera.setSceneBounds(this.modelBounds);
+    }
+
+    addHugeGeometryChunk(chunk: HugeGeometryChunk): void {
+        if (!this.device.isInitialized() || !this.pipeline) {
+            throw new Error('Renderer not initialized. Call init() first.');
+        }
+
+        const device = this.device.getDevice();
+        this.scene.appendHugeChunk(chunk, device, this.pipeline);
+
+        const chunkBounds = {
+            min: { x: chunk.boundsMin[0], y: chunk.boundsMin[1], z: chunk.boundsMin[2] },
+            max: { x: chunk.boundsMax[0], y: chunk.boundsMax[1], z: chunk.boundsMax[2] },
+        };
+        if (!this.modelBounds) {
+            this.modelBounds = chunkBounds;
+        } else {
+            this.modelBounds = {
+                min: {
+                    x: Math.min(this.modelBounds.min.x, chunkBounds.min.x),
+                    y: Math.min(this.modelBounds.min.y, chunkBounds.min.y),
+                    z: Math.min(this.modelBounds.min.z, chunkBounds.min.z),
+                },
+                max: {
+                    x: Math.max(this.modelBounds.max.x, chunkBounds.max.x),
+                    y: Math.max(this.modelBounds.max.y, chunkBounds.max.y),
+                    z: Math.max(this.modelBounds.max.z, chunkBounds.max.z),
+                },
+            };
+        }
+        this.camera.setSceneBounds(this.modelBounds);
+    }
+
+    getHugeGeometryStats(): HugeGeometryStats | null {
+        return this.scene.getHugeGeometryStats();
+    }
+
+    getHugeEntityInfo(expressId: number): HugeGeometryEntityInfo | null {
+        return this.scene.getHugeEntityInfo(expressId);
     }
 
     /**

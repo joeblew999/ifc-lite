@@ -72,6 +72,60 @@ describe('DataSlice', () => {
       state.setGeometryResult(mockResult);
       assert.strictEqual(state.geometryResult, mockResult);
     });
+
+    it('should reset huge geometry state when legacy geometry result is set', () => {
+      const entities = new Map([
+        [1, {
+          expressId: 1,
+          ifcType: 'IfcWall',
+          color: [1, 0, 0, 1] as [number, number, number, number],
+          boundsMin: [0, 0, 0] as [number, number, number],
+          boundsMax: [1, 1, 1] as [number, number, number],
+        }],
+      ]);
+      state.setHugeGeometryState(true, {
+        totalBatches: 1,
+        totalElements: 1,
+        totalVertices: 12,
+        totalTriangles: 4,
+      }, entities);
+
+      const mockResult = { meshes: [], totalTriangles: 0, totalVertices: 0 } as any;
+      state.setGeometryResult(mockResult);
+
+      assert.strictEqual(state.hugeGeometryMode, false);
+      assert.strictEqual(state.hugeGeometryStats, null);
+      assert.strictEqual(state.hugeGeometryEntities.size, 0);
+      assert.strictEqual(state.geometryResult, mockResult);
+    });
+  });
+
+  describe('setHugeGeometryState', () => {
+    it('should store huge geometry metadata without mutating the source map', () => {
+      const entities = new Map([
+        [7, {
+          expressId: 7,
+          ifcType: 'IfcSlab',
+          color: [0.2, 0.3, 0.4, 1] as [number, number, number, number],
+          boundsMin: [1, 2, 3] as [number, number, number],
+          boundsMax: [4, 5, 6] as [number, number, number],
+        }],
+      ]);
+
+      state.setHugeGeometryState(true, {
+        totalBatches: 2,
+        totalElements: 1,
+        totalVertices: 24,
+        totalTriangles: 8,
+      }, entities);
+
+      entities.clear();
+
+      assert.strictEqual(state.hugeGeometryMode, true);
+      assert.strictEqual(state.hugeGeometryStats?.totalBatches, 2);
+      assert.strictEqual(state.hugeGeometryEntities.size, 1);
+      assert.strictEqual(state.hugeGeometryEntities.get(7)?.ifcType, 'IfcSlab');
+    });
   });
 
   describe('appendGeometryBatch', () => {

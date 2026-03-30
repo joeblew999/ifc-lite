@@ -4,8 +4,9 @@
 
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import type { IfcDataStore } from '@ifc-lite/parser';
-import type { GeometryResult } from '@ifc-lite/geometry';
+import type { GeometryResult, HugeGeometryEntityInfo } from '@ifc-lite/geometry';
 import { useViewerStore, type FederatedModel } from '@/store';
+import { getGeometryElementCount, getGeometryEntityIds } from '@/utils/geometrySummary';
 import type { TreeNode, UnifiedStorey } from './types';
 import {
   buildUnifiedStoreys,
@@ -33,19 +34,18 @@ interface UseHierarchyTreeParams {
 function buildGeometricIdSet(
   models: Map<string, FederatedModel>,
   legacyGeometry: GeometryResult | null | undefined,
+  legacyHugeGeometryEntities: Map<number, HugeGeometryEntityInfo>,
 ): Set<number> {
   const ids = new Set<number>();
   if (models.size > 0) {
     for (const [, model] of models) {
-      if (model.geometryResult) {
-        for (const mesh of model.geometryResult.meshes) {
-          ids.add(mesh.expressId);
-        }
+      for (const expressId of getGeometryEntityIds(model.geometryResult, model.hugeGeometryEntities)) {
+        ids.add(expressId);
       }
     }
   } else if (legacyGeometry) {
-    for (const mesh of legacyGeometry.meshes) {
-      ids.add(mesh.expressId);
+    for (const expressId of getGeometryEntityIds(legacyGeometry, legacyHugeGeometryEntities)) {
+      ids.add(expressId);
     }
   }
   return ids;
@@ -58,6 +58,8 @@ export function useHierarchyTree({ models, ifcDataStore, isMultiModel, geometryR
   const [groupingMode, setGroupingMode] = useState<GroupingMode>(() =>
     (typeof window !== 'undefined' && localStorage.getItem('hierarchy-grouping') as GroupingMode) || 'spatial'
   );
+  const hugeGeometryStats = useViewerStore((state) => state.hugeGeometryStats);
+  const hugeGeometryEntities = useViewerStore((state) => state.hugeGeometryEntities);
 
   // Build unified storey data for multi-model mode (moved before useEffect that depends on it)
   const unifiedStoreys = useMemo(
@@ -158,12 +160,12 @@ export function useHierarchyTree({ models, ifcDataStore, isMultiModel, geometryR
     if (models.size > 0) {
       let count = 0;
       for (const [, model] of models) {
-        count += model.geometryResult?.meshes.length ?? 0;
+        count += getGeometryElementCount(model.geometryResult, model.hugeGeometryStats);
       }
       return count;
     }
-    return geometryResult?.meshes.length ?? 0;
-  }, [models, geometryResult?.meshes.length]);
+    return getGeometryElementCount(geometryResult, hugeGeometryStats);
+  }, [geometryResult, hugeGeometryStats, models]);
 
   // Pre-computed set of global IDs with geometry — stable across color changes.
   // PERF: Skip when no geometry source exists (during initial streaming before
@@ -171,9 +173,9 @@ export function useHierarchyTree({ models, ifcDataStore, isMultiModel, geometryR
   // (models.size > 0 but ifcDataStore is null) still build the set correctly.
   const hasGeometrySource = models.size > 0 || !!ifcDataStore;
   const geometricIds = useMemo(
-    () => hasGeometrySource ? buildGeometricIdSet(models, geometryResult) : new Set<number>(),
+    () => hasGeometrySource ? buildGeometricIdSet(models, geometryResult, hugeGeometryEntities) : new Set<number>(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- meshCount is a stable proxy; hasGeometrySource gates streaming
-    [models, hasGeometrySource ? meshCount : 0]
+    [geometryResult, hugeGeometryEntities, models, hasGeometrySource ? meshCount : 0]
   );
 
   const toGlobalIdsForModel = useCallback((modelId: string, expressIds: number[]): number[] => {

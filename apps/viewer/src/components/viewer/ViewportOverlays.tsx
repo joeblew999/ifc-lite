@@ -15,6 +15,7 @@ import { useViewerStore } from '@/store';
 import { goHomeFromStore } from '@/store/homeView';
 import { useIfc } from '@/hooks/useIfc';
 import { cn } from '@/lib/utils';
+import { getGeometryElementCount } from '@/utils/geometrySummary';
 import { ViewCube, type ViewCubeRef } from './ViewCube';
 import { AxisHelper, type AxisHelperRef } from './AxisHelper';
 
@@ -26,6 +27,7 @@ export function ViewportOverlays({ hideViewCube = false }: { hideViewCube?: bool
   const cameraCallbacks = useViewerStore((s) => s.cameraCallbacks);
   const setOnCameraRotationChange = useViewerStore((s) => s.setOnCameraRotationChange);
   const setOnScaleChange = useViewerStore((s) => s.setOnScaleChange);
+  const hugeGeometryStats = useViewerStore((s) => s.hugeGeometryStats);
   const { ifcDataStore, geometryResult } = useIfc();
 
   // Use refs for rotation to avoid re-renders - ViewCube updates itself directly
@@ -74,7 +76,7 @@ export function ViewportOverlays({ hideViewCube = false }: { hideViewCube?: bool
     : null;
 
   // Calculate visible count considering visibility filters
-  const totalCount = geometryResult?.meshes?.length ?? 0;
+  const totalCount = getGeometryElementCount(geometryResult, hugeGeometryStats);
   let visibleCount = totalCount;
   if (isolatedEntities !== null) {
     visibleCount = isolatedEntities.size;

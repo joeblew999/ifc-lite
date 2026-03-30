@@ -15,6 +15,10 @@ import type { EntityRef } from './types.js';
 import { entityRefToString, stringToEntityRef } from './types.js';
 import { useViewerStore } from './index.js';
 import { toGlobalIdFromModels } from './globalId.js';
+import {
+  getGeometryElementCount,
+  getGeometryEntityInfos,
+} from '../utils/geometrySummary.js';
 
 type ViewerStateSnapshot = ReturnType<typeof useViewerStore.getState>;
 
@@ -67,7 +71,9 @@ function visibilityFingerprint(state: ViewerStateSnapshot): string {
   // invalidates when model visibility is toggled or geometry finishes loading.
   const modelParts: string[] = [];
   for (const [modelId, model] of state.models) {
-    modelParts.push(`${modelId}:${model.visible ? 1 : 0}:${model.geometryResult?.meshes?.length ?? 0}`);
+    modelParts.push(
+      `${modelId}:${model.visible ? 1 : 0}:${getGeometryElementCount(model.geometryResult, model.hugeGeometryStats)}`,
+    );
   }
   modelParts.sort();
 
@@ -84,7 +90,7 @@ function visibilityFingerprint(state: ViewerStateSnapshot): string {
     tv.site ? 1 : 0,
     state.models.size,
     modelParts.join(';'),
-    state.geometryResult?.meshes?.length ?? 0,
+    getGeometryElementCount(state.geometryResult, state.hugeGeometryStats),
     state.activeBasketViewId ?? 'none',
   ].join(':');
 }
@@ -342,25 +348,25 @@ function collectVisibleCandidates(state: ViewerStateSnapshot): VisibleCandidate[
     for (const [modelId, model] of state.models) {
       if (!model.visible) continue;
       const offset = model.idOffset ?? 0;
-      for (const mesh of model.geometryResult.meshes) {
-        if (!matchesTypeVisibility(mesh.ifcType, state.typeVisibility)) continue;
-        const globalId = mesh.expressId;
+      for (const entity of getGeometryEntityInfos(model.geometryResult, model.hugeGeometryEntities)) {
+        if (!matchesTypeVisibility(entity.ifcType, state.typeVisibility)) continue;
+        const globalId = toGlobalIdFromModels(state.models, modelId, entity.expressId);
         candidates.push({
           globalId,
           modelId,
           expressId: globalId - offset,
-          ifcType: mesh.ifcType,
+          ifcType: entity.ifcType,
         });
       }
     }
-  } else if (state.geometryResult) {
-    for (const mesh of state.geometryResult.meshes) {
-      if (!matchesTypeVisibility(mesh.ifcType, state.typeVisibility)) continue;
+  } else if (state.geometryResult || state.hugeGeometryEntities.size > 0) {
+    for (const entity of getGeometryEntityInfos(state.geometryResult, state.hugeGeometryEntities)) {
+      if (!matchesTypeVisibility(entity.ifcType, state.typeVisibility)) continue;
       candidates.push({
-        globalId: mesh.expressId,
+        globalId: entity.expressId,
         modelId: 'legacy',
-        expressId: mesh.expressId,
-        ifcType: mesh.ifcType,
+        expressId: entity.expressId,
+        ifcType: entity.ifcType,
       });
     }
   }

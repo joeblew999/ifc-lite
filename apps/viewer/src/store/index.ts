@@ -157,6 +157,9 @@ export const useViewerStore = create<ViewerState>()((...args) => ({
       isolatedEntitiesByModel: new Map(),
 
       // Data
+      hugeGeometryMode: false,
+      hugeGeometryStats: null,
+      hugeGeometryEntities: new Map(),
       pendingColorUpdates: null,
       pendingMeshColorUpdates: null,
 

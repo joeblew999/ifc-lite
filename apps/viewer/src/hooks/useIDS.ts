@@ -216,6 +216,7 @@ export function useIDS(options: UseIDSOptions = {}): UseIDSResult {
   const toGlobalId = useViewerStore((s) => s.toGlobalId);
   const cameraCallbacks = useViewerStore((s) => s.cameraCallbacks);
   const geometryResult = useViewerStore((s) => s.geometryResult);
+  const hugeGeometryEntities = useViewerStore((s) => s.hugeGeometryEntities);
 
   // Ref to store original colors before IDS color overrides
   const originalColorsRef = useRef<Map<number, ColorTuple>>(new Map());
@@ -440,13 +441,14 @@ export function useIDS(options: UseIDSOptions = {}): UseIDSResult {
       defaultFailedColor,
       defaultPassedColor,
       geometryResultRef.current,
-      originalColorsRef.current
+      originalColorsRef.current,
+      hugeGeometryEntities,
     );
 
     if (colorUpdates.size > 0) {
       setPendingColorUpdates(colorUpdates);
     }
-  }, [report, models, displayOptions, defaultFailedColor, defaultPassedColor, setPendingColorUpdates]);
+  }, [report, models, displayOptions, defaultFailedColor, defaultPassedColor, hugeGeometryEntities, setPendingColorUpdates]);
 
   const clearColors = useCallback(() => {
     // Empty map signals overlay clear immediately.

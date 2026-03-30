@@ -14,6 +14,7 @@ import { toGlobalIdFromModels } from '@/store/globalId';
 import { collectIfcBuildingStoreyElementsWithIfcSpace } from '@/store/basketVisibleSet';
 import { useIfc } from '@/hooks/useIfc';
 import { useWebGPU } from '@/hooks/useWebGPU';
+import { hasGeometryLoaded, hasModelGeometryLoaded } from '@/utils/geometrySummary';
 import { Upload, MousePointer, Layers, Info, Command, AlertTriangle, ChevronDown, ExternalLink, Plus } from 'lucide-react';
 import type { MeshData, CoordinateInfo, GeometryResult } from '@ifc-lite/geometry';
 
@@ -33,6 +34,7 @@ export function ViewportContainer() {
   const classFilter = useViewerStore((s) => s.classFilter);
   // Multi-model support: get all loaded models from store (for merged geometry)
   const storeModels = useViewerStore((s) => s.models);
+  const hugeGeometryStats = useViewerStore((s) => s.hugeGeometryStats);
   const resetViewerState = useViewerStore((s) => s.resetViewerState);
   const bcfOverlayVisible = useViewerStore((s) => s.bcfOverlayVisible);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -41,7 +43,7 @@ export function ViewportContainer() {
   const webgpu = useWebGPU();
 
   // Check if we have models loaded (for determining add vs replace behavior)
-  const hasModelsLoaded = models.size > 0 || (geometryResult?.meshes && geometryResult.meshes.length > 0);
+  const hasModelsLoaded = models.size > 0 || hasGeometryLoaded(geometryResult, hugeGeometryStats);
 
   // Multi-model: create mapping from modelId to modelIndex (stable order)
   const modelIdToIndex = useMemo(() => {
@@ -173,10 +175,11 @@ export function ViewportContainer() {
     e.target.value = '';
   }, [loadFile, loadFilesSequentially, resetViewerState, clearAllModels, webgpu.supported]);
 
-  const hasGeometry = mergedGeometryResult?.meshes && mergedGeometryResult.meshes.length > 0;
+  const hasGeometry = hasGeometryLoaded(mergedGeometryResult, hugeGeometryStats);
 
   // Check if any models are loaded (even if hidden) - used to show empty 3D vs starting UI
-  const hasLoadedModels = storeModels.size > 0 || (geometryResult?.meshes && geometryResult.meshes.length > 0);
+  const hasLoadedModels = Array.from(storeModels.values()).some(hasModelGeometryLoaded)
+    || hasGeometryLoaded(geometryResult, hugeGeometryStats);
 
   // PERF: Incremental geometry filtering using refs.
   // Instead of creating a new 200K+ element array every batch (~200ms),

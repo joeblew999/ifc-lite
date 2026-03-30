@@ -8,13 +8,21 @@
 
 import type { StateCreator } from 'zustand';
 import type { IfcDataStore } from '@ifc-lite/parser';
-import type { GeometryResult, CoordinateInfo } from '@ifc-lite/geometry';
+import type {
+  GeometryResult,
+  CoordinateInfo,
+  HugeGeometryEntityInfo,
+  HugeGeometryStats,
+} from '@ifc-lite/geometry';
 import { DATA_DEFAULTS } from '../constants.js';
 
 export interface DataSlice {
   // State
   ifcDataStore: IfcDataStore | null;
   geometryResult: GeometryResult | null;
+  hugeGeometryMode: boolean;
+  hugeGeometryStats: HugeGeometryStats | null;
+  hugeGeometryEntities: Map<number, HugeGeometryEntityInfo>;
   /** Transient overlay colors (lens/IDS/sdk overlays). */
   pendingColorUpdates: Map<number, [number, number, number, number]> | null;
   /** Persistent mesh color updates (IFC deferred style/material colors). */
@@ -23,6 +31,11 @@ export interface DataSlice {
   // Actions
   setIfcDataStore: (result: IfcDataStore | null) => void;
   setGeometryResult: (result: GeometryResult | null) => void;
+  setHugeGeometryState: (
+    mode: boolean,
+    stats?: HugeGeometryStats | null,
+    entities?: Map<number, HugeGeometryEntityInfo>
+  ) => void;
   appendGeometryBatch: (meshes: GeometryResult['meshes'], coordinateInfo?: CoordinateInfo) => void;
   /** Persist mesh color changes in geometryResult (used for IFC style/material updates). */
   updateMeshColors: (updates: Map<number, [number, number, number, number]>) => void;
@@ -53,13 +66,27 @@ export const createDataSlice: StateCreator<DataSlice, [], [], DataSlice> = (set)
   // Initial state
   ifcDataStore: null,
   geometryResult: null,
+  hugeGeometryMode: false,
+  hugeGeometryStats: null,
+  hugeGeometryEntities: new Map(),
   pendingColorUpdates: null,
   pendingMeshColorUpdates: null,
 
   // Actions
   setIfcDataStore: (ifcDataStore) => set({ ifcDataStore }),
 
-  setGeometryResult: (geometryResult) => set({ geometryResult }),
+  setGeometryResult: (geometryResult) => set({
+    geometryResult,
+    hugeGeometryMode: false,
+    hugeGeometryStats: null,
+    hugeGeometryEntities: new Map(),
+  }),
+
+  setHugeGeometryState: (mode, stats = null, entities = new Map()) => set(() => ({
+    hugeGeometryMode: mode,
+    hugeGeometryStats: stats,
+    hugeGeometryEntities: new Map(entities),
+  })),
 
   appendGeometryBatch: (meshes, coordinateInfo) => set((state) => {
     // Incremental totals: O(batch_size) instead of O(total_accumulated) .reduce()

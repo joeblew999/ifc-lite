@@ -78,6 +78,56 @@ export interface GeometryResult {
   coordinateInfo: CoordinateInfo;
 }
 
+/**
+ * Metadata-first geometry entry used by the progressive partitioned pipeline.
+ * Carries the minimum per-entity information needed before raw mesh data exists.
+ */
+export interface HugeGeometryEntityInfo {
+  expressId: number;
+  ifcType?: string;
+  modelIndex?: number;
+  color: [number, number, number, number];
+  boundsMin: [number, number, number];
+  boundsMax: [number, number, number];
+}
+
+/**
+ * Row describing where an entity lives inside a pre-batched geometry chunk.
+ */
+export interface HugeGeometryElementRow extends HugeGeometryEntityInfo {
+  vertexOffset: number;
+  vertexCount: number;
+  indexOffset: number;
+  indexCount: number;
+}
+
+/**
+ * Pre-batched geometry chunk owned by the renderer.
+ * Vertex data is already interleaved and render-ready.
+ */
+export interface HugeGeometryChunk {
+  batchId: number;
+  color: [number, number, number, number];
+  modelIndex?: number;
+  vertexData: Float32Array;
+  indexData: Uint32Array;
+  vertexStrideFloats: number;
+  indexCount: number;
+  boundsMin: [number, number, number];
+  boundsMax: [number, number, number];
+  elements: HugeGeometryElementRow[];
+}
+
+/**
+ * Aggregate stats for metadata-first / progressive geometry mode.
+ */
+export interface HugeGeometryStats {
+  totalBatches: number;
+  totalElements: number;
+  totalVertices: number;
+  totalTriangles: number;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SYMBOLIC REPRESENTATION TYPES
 // For Plan, Annotation, FootPrint representations (2D curves for drawings)

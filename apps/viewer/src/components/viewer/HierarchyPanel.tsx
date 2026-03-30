@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useViewerStore, resolveEntityRef } from '@/store';
 import { toGlobalIdFromModels } from '@/store/globalId';
 import { useIfc } from '@/hooks/useIfc';
+import { getGeometryEntityInfo } from '@/utils/geometrySummary';
 
 import type { TreeNode } from './hierarchy/types';
 import { isSpatialContainer } from './hierarchy/types';
@@ -54,6 +55,7 @@ export function HierarchyPanel() {
   const clearClassFilter = useViewerStore((s) => s.clearClassFilter);
   const clearAllFilters = useViewerStore((s) => s.clearAllFilters);
   const setHierarchyBasketSelection = useViewerStore((s) => s.setHierarchyBasketSelection);
+  const hugeGeometryEntities = useViewerStore((s) => s.hugeGeometryEntities);
 
   const hiddenEntities = useViewerStore((s) => s.hiddenEntities);
   const hideEntities = useViewerStore((s) => s.hideEntities);
@@ -66,19 +68,22 @@ export function HierarchyPanel() {
     if (!isolatedEntities || isolatedEntities.size === 0) return null;
     const sampleId = isolatedEntities.values().next().value!;
     for (const [, model] of models) {
-      const gr = model.geometryResult;
-      if (!gr?.meshes) continue;
-      const mesh = gr.meshes.find((m: { expressId: number }) =>
+      for (const [expressId, entity] of (model.hugeGeometryEntities ?? new Map()).entries()) {
+        if (toGlobalIdFromModels(models, model.id, expressId) === sampleId && entity.ifcType) {
+          return entity.ifcType;
+        }
+      }
+      const mesh = model.geometryResult?.meshes.find((m: { expressId: number }) =>
         toGlobalIdFromModels(models, model.id, m.expressId) === sampleId,
       );
       if (mesh?.ifcType) return mesh.ifcType;
     }
-    if (geometryResult?.meshes) {
-      const mesh = geometryResult.meshes.find((m: { expressId: number }) => m.expressId === sampleId);
-      if (mesh?.ifcType) return mesh.ifcType;
+    const entity = getGeometryEntityInfo(sampleId, geometryResult, hugeGeometryEntities);
+    if (entity?.ifcType) {
+      return entity.ifcType;
     }
     return `${isolatedEntities.size} elements`;
-  }, [isolatedEntities, models, geometryResult]);
+  }, [geometryResult, hugeGeometryEntities, isolatedEntities, models]);
 
   const hasActiveFilters = selectedStoreys.size > 0 || isolatedEntities !== null || classFilter !== null;
 
