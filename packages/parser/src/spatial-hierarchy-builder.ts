@@ -51,29 +51,39 @@ export class SpatialHierarchyBuilder {
 
     // Find IfcProject (should be only one)
     const projectIds = entities.getByType(IfcTypeEnum.IfcProject);
-    if (projectIds.length === 0) {
-      console.warn('[SpatialHierarchyBuilder] No IfcProject found in IFC file');
-      throw new Error('No IfcProject found in IFC file');
-    }
-    const projectId = projectIds[0];
+    let projectNode: SpatialNode;
 
-    // Build project node
-    const projectNode = this.buildNode(
-      projectId,
-      entities,
-      relationships,
-      strings,
-      source,
-      entityIndex,
-      byStorey,
-      byBuilding,
-      bySite,
-      bySpace,
-      storeyElevations,
-      elementToStorey,
-      entityTypeMap,
-      lengthUnitScale
-    );
+    if (projectIds.length === 0) {
+      console.warn('[SpatialHierarchyBuilder] No IfcProject found in IFC file – using synthetic root');
+      // Build a synthetic project node so the file still opens
+      projectNode = {
+        expressId: 0,
+        type: IfcTypeEnum.IfcProject,
+        name: '(No IfcProject)',
+        children: [],
+        elements: [],
+      };
+    } else {
+      const projectId = projectIds[0];
+
+      // Build project node
+      projectNode = this.buildNode(
+        projectId,
+        entities,
+        relationships,
+        strings,
+        source,
+        entityIndex,
+        byStorey,
+        byBuilding,
+        bySite,
+        bySpace,
+        storeyElevations,
+        elementToStorey,
+        entityTypeMap,
+        lengthUnitScale
+      );
+    }
 
     // Note: storeyHeights remains empty for client path - uses on-demand property extraction
 
