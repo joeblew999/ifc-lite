@@ -22,6 +22,18 @@ use js_sys::Function;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
+fn color_bucket_key(color: [f32; 4]) -> u64 {
+    let r = (color[0].clamp(0.0, 1.0) * 255.0).round() as u64;
+    let g = (color[1].clamp(0.0, 1.0) * 255.0).round() as u64;
+    let b = (color[2].clamp(0.0, 1.0) * 255.0).round() as u64;
+    let a = (color[3].clamp(0.0, 1.0) * 255.0).round() as u64;
+    (r << 24) | (g << 16) | (b << 8) | a
+}
+
+fn new_gpu_batch(batch_size: usize) -> GpuGeometry {
+    GpuGeometry::with_capacity(batch_size * 1000 * 7, batch_size * 3000)
+}
+
 #[wasm_bindgen]
 impl IfcAPI {
     /// Parse IFC file and return individual meshes with express IDs and colors
@@ -1666,7 +1678,7 @@ impl IfcAPI {
         // Estimate capacity
         let estimated_vertices = content.len() / 50; // Rough estimate
         let estimated_indices = estimated_vertices * 2;
-        let mut gpu_geometry = GpuGeometry::with_capacity(estimated_vertices * 6, estimated_indices);
+        let mut gpu_geometry = GpuGeometry::with_capacity(estimated_vertices * 7, estimated_indices);
 
         // Process all building elements
         while let Some((id, type_name, start, end)) = scanner.next_entity() {
@@ -1830,7 +1842,8 @@ impl IfcAPI {
                 scanner = EntityScanner::new(&content);
 
                 // Processing state
-                let mut current_batch = GpuGeometry::with_capacity(batch_size * 1000, batch_size * 3000);
+                let mut current_batches: rustc_hash::FxHashMap<u64, GpuGeometry> =
+                    rustc_hash::FxHashMap::default();
                 let mut processed = 0;
                 let mut total_meshes = 0;
                 let mut total_vertices = 0;
@@ -1839,23 +1852,33 @@ impl IfcAPI {
                     Vec::new();
 
                 // Helper to flush current batch (captures RTC offset for each batch)
-                let flush_batch = |batch: &mut GpuGeometry,
-                                   on_batch: &Option<Function>,
-                                   progress: &JsValue| {
-                    if batch.mesh_count() == 0 {
+                let flush_bucket = |key: u64,
+                                    batches: &mut rustc_hash::FxHashMap<u64, GpuGeometry>,
+                                    on_batch: &Option<Function>,
+                                    progress: &JsValue| {
+                    let Some(mut to_send) = batches.remove(&key) else {
+                        return;
+                    };
+
+                    if to_send.mesh_count() == 0 {
                         return;
                     }
 
+                    if needs_shift {
+                        to_send.set_rtc_offset(rtc_offset.0, rtc_offset.1, rtc_offset.2);
+                    }
+
                     if let Some(ref callback) = on_batch {
-                        // Swap out the batch and set RTC offset before sending
-                        let mut to_send =
-                            std::mem::replace(batch, GpuGeometry::with_capacity(1000, 3000));
-                        if needs_shift {
-                            to_send.set_rtc_offset(rtc_offset.0, rtc_offset.1, rtc_offset.2);
-                        }
                         let _ = callback.call2(&JsValue::NULL, &to_send.into(), progress);
-                    } else {
-                        batch.clear();
+                    }
+                };
+
+                let flush_all_buckets = |batches: &mut rustc_hash::FxHashMap<u64, GpuGeometry>,
+                                         on_batch: &Option<Function>,
+                                         progress: &JsValue| {
+                    let keys: Vec<u64> = batches.keys().copied().collect();
+                    for key in keys {
+                        flush_bucket(key, batches, on_batch, progress);
                     }
                 };
 
@@ -1907,7 +1930,12 @@ impl IfcAPI {
                                         total_vertices += mesh.positions.len() / 3;
                                         total_triangles += mesh.indices.len() / 3;
 
-                                        current_batch.add_mesh(
+                                        let bucket_key = color_bucket_key(color);
+                                        let batch = current_batches
+                                            .entry(bucket_key)
+                                            .or_insert_with(|| new_gpu_batch(batch_size));
+
+                                        batch.add_mesh(
                                             id,
                                             ifc_type.name(),
                                             &mesh.positions,
@@ -1917,22 +1945,17 @@ impl IfcAPI {
                                         );
                                         processed += 1;
                                         total_meshes += 1;
+
+                                        if batch.mesh_count() >= batch_size {
+                                            let progress = js_sys::Object::new();
+                                            super::set_js_prop(&progress, "percent", &0u32.into());
+                                            super::set_js_prop(&progress, "processed", &(processed as f64).into());
+                                            super::set_js_prop(&progress, "phase", &"simple".into());
+                                            flush_bucket(bucket_key, &mut current_batches, &on_batch, &progress.into());
+                                        }
                                     }
                                 }
                             }
-                        }
-
-                        // Yield batch when full
-                        if current_batch.mesh_count() >= batch_size {
-                            let progress = js_sys::Object::new();
-                            super::set_js_prop(&progress, "percent", &0u32.into());
-                            super::set_js_prop(&progress, "processed", &(processed as f64).into());
-                            super::set_js_prop(&progress, "phase", &"simple".into());
-
-                            flush_batch(&mut current_batch, &on_batch, &progress.into());
-
-                            // Yield to browser
-                            // yield removed — sync for speed
                         }
                     } else {
                         // Defer complex geometry
@@ -1941,10 +1964,10 @@ impl IfcAPI {
                 }
 
                 // Flush remaining simple geometry
-                if current_batch.mesh_count() > 0 {
+                if !current_batches.is_empty() {
                     let progress = js_sys::Object::new();
                     super::set_js_prop(&progress, "phase", &"simple_complete".into());
-                    flush_batch(&mut current_batch, &on_batch, &progress.into());
+                    flush_all_buckets(&mut current_batches, &on_batch, &progress.into());
                     // yield removed — sync for speed
                 }
 
@@ -1968,7 +1991,12 @@ impl IfcAPI {
                                 total_vertices += mesh.positions.len() / 3;
                                 total_triangles += mesh.indices.len() / 3;
 
-                                current_batch.add_mesh(
+                                let bucket_key = color_bucket_key(color);
+                                let batch = current_batches
+                                    .entry(bucket_key)
+                                    .or_insert_with(|| new_gpu_batch(batch_size));
+
+                                batch.add_mesh(
                                     id,
                                     ifc_type.name(),
                                     &mesh.positions,
@@ -1977,32 +2005,29 @@ impl IfcAPI {
                                     color,
                                 );
                                 total_meshes += 1;
+
+                                if batch.mesh_count() >= batch_size {
+                                    let progress = js_sys::Object::new();
+                                    let percent = (processed as f64 / total_elements as f64 * 100.0) as u32;
+                                    super::set_js_prop(&progress, "percent", &percent.into());
+                                    super::set_js_prop(&progress, "processed", &(processed as f64).into());
+                                    super::set_js_prop(&progress, "total", &(total_elements as f64).into());
+                                    super::set_js_prop(&progress, "phase", &"complex".into());
+                                    flush_bucket(bucket_key, &mut current_batches, &on_batch, &progress.into());
+                                }
                             }
                         }
                     }
 
                     processed += 1;
-
-                    // Yield batch when full
-                    if current_batch.mesh_count() >= batch_size {
-                        let progress = js_sys::Object::new();
-                        let percent = (processed as f64 / total_elements as f64 * 100.0) as u32;
-                        super::set_js_prop(&progress, "percent", &percent.into());
-                        super::set_js_prop(&progress, "processed", &(processed as f64).into());
-                        super::set_js_prop(&progress, "total", &(total_elements as f64).into());
-                        super::set_js_prop(&progress, "phase", &"complex".into());
-
-                        flush_batch(&mut current_batch, &on_batch, &progress.into());
-                        // yield removed — sync for speed
-                    }
                 }
 
                 // Final flush
-                if current_batch.mesh_count() > 0 {
+                if !current_batches.is_empty() {
                     let progress = js_sys::Object::new();
                     super::set_js_prop(&progress, "percent", &100u32.into());
                     super::set_js_prop(&progress, "phase", &"complete".into());
-                    flush_batch(&mut current_batch, &on_batch, &progress.into());
+                    flush_all_buckets(&mut current_batches, &on_batch, &progress.into());
                 }
 
                 // Call completion callback

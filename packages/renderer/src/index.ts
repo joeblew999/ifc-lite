@@ -49,7 +49,7 @@ import { Picker } from './picker.js';
 import { MathUtils } from './math.js';
 import { FrustumUtils } from '@ifc-lite/spatial';
 import { deduplicateMeshes } from '@ifc-lite/geometry';
-import type { MeshData, HugeGeometryChunk, HugeGeometryEntityInfo, HugeGeometryStats } from '@ifc-lite/geometry';
+import type { MeshData, HugeGeometryChunk, HugeGeometryEntityInfo, HugeGeometryStats, ZeroCopyBatch } from '@ifc-lite/geometry';
 import type {
     RenderOptions,
     PickOptions,
@@ -130,8 +130,9 @@ export class Renderer {
 
     // Pooled per-frame buffers to avoid GC pressure from per-batch Float32Array allocations
     // A single 192-byte uniform buffer (48 floats) is reused for all batches/meshes within a frame
-    private readonly uniformScratch = new Float32Array(48);
+    private readonly uniformScratch = new Float32Array(52);
     private readonly uniformScratchU32 = new Uint32Array(this.uniformScratch.buffer, 176, 4);
+    private readonly uniformScratchSelected = new Uint32Array(this.uniformScratch.buffer, 192, 4);
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
@@ -268,6 +269,28 @@ export class Renderer {
             };
         }
         this.camera.setSceneBounds(this.modelBounds);
+    }
+
+    addZeroCopyGeometryBatch(batch: ZeroCopyBatch, modelIndex?: number): void {
+        if (!this.device.isInitialized() || !this.pipeline) {
+            throw new Error('Renderer not initialized. Call init() first.');
+        }
+
+        const device = this.device.getDevice();
+        this.scene.appendZeroCopyBatch(batch, device, this.pipeline, modelIndex);
+
+        const stats = this.scene.getHugeGeometryStats();
+        const bounds = this.getScene().getBounds();
+        if (bounds) {
+            this.modelBounds = bounds;
+            this.camera.setSceneBounds(this.modelBounds);
+        } else if (stats && !this.modelBounds) {
+            // Keep camera bounds valid even before a direct bounds recompute lands.
+            this.modelBounds = {
+                min: { x: -1, y: -1, z: -1 },
+                max: { x: 1, y: 1, z: 1 },
+            };
+        }
     }
 
     getHugeGeometryStats(): HugeGeometryStats | null {
@@ -916,6 +939,12 @@ export class Renderer {
             // Reuse pooled scratch buffer for per-mesh uniform writes
             const meshBuf = this.uniformScratch;
             const meshFlags = this.uniformScratchU32;
+            const meshSelected = this.uniformScratchSelected;
+            const singleSelectedId = selectedId ?? (
+                selectedIds && selectedIds.size === 1
+                    ? selectedIds.values().next().value ?? null
+                    : null
+            );
             for (const mesh of allMeshes) {
                 if (mesh.uniformBuffer) {
                     meshBuf.set(viewProj, 0);
@@ -951,6 +980,10 @@ export class Renderer {
                     meshFlags[1] = sectionPlaneData?.enabled ? 1 : 0;
                     meshFlags[2] = edgeEnabledU32;
                     meshFlags[3] = edgeIntensityMilliU32;
+                    meshSelected[0] = singleSelectedId ?? 0;
+                    meshSelected[1] = singleSelectedId !== null ? 1 : 0;
+                    meshSelected[2] = 0;
+                    meshSelected[3] = 0;
 
                     device.queue.writeBuffer(mesh.uniformBuffer, 0, meshBuf);
                 }
@@ -1104,6 +1137,7 @@ export class Renderer {
                 // (viewProj, identity model, material, section plane, flags) is identical.
                 const tpl = this.uniformScratch;
                 const tplFlags = this.uniformScratchU32;
+                const tplSelected = this.uniformScratchSelected;
                 tpl.set(viewProj, 0);
                 // Identity model matrix (positions already in world space)
                 tpl[16] = 1; tpl[17] = 0; tpl[18] = 0; tpl[19] = 0;
@@ -1127,6 +1161,10 @@ export class Renderer {
                 tplFlags[1] = sectionPlaneData?.enabled ? 1 : 0;
                 tplFlags[2] = edgeEnabledU32;
                 tplFlags[3] = edgeIntensityMilliU32;
+                tplSelected[0] = singleSelectedId ?? 0;
+                tplSelected[1] = singleSelectedId !== null ? 1 : 0;
+                tplSelected[2] = 0;
+                tplSelected[3] = 0;
 
                 // Helper function to render a batch — patches color into the shared template
                 const renderBatch = (batch: typeof allBatchedMeshes[0]) => {
@@ -1274,6 +1312,10 @@ export class Renderer {
                         tplFlags[1] = sectionPlaneData?.enabled ? 1 : 0;
                         tplFlags[2] = edgeEnabledU32;
                         tplFlags[3] = edgeIntensityMilliU32;
+                        tplSelected[0] = singleSelectedId ?? 0;
+                        tplSelected[1] = singleSelectedId !== null ? 1 : 0;
+                        tplSelected[2] = 0;
+                        tplSelected[3] = 0;
 
                         device.queue.writeBuffer(mesh.uniformBuffer, 0, tpl);
 
@@ -1328,6 +1370,10 @@ export class Renderer {
                     tplFlags[1] = sectionPlaneData?.enabled ? 1 : 0;
                     tplFlags[2] = edgeEnabledU32;
                     tplFlags[3] = edgeIntensityMilliU32;
+                    tplSelected[0] = singleSelectedId ?? 0;
+                    tplSelected[1] = singleSelectedId !== null ? 1 : 0;
+                    tplSelected[2] = 0;
+                    tplSelected[3] = 0;
 
                     device.queue.writeBuffer(mesh.uniformBuffer, 0, tpl);
 

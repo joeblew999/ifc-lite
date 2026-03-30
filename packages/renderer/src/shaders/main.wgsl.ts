@@ -16,6 +16,7 @@ export const mainShaderSource = `
           _padding1: vec2<f32>,
           sectionPlane: vec4<f32>,      // xyz = plane normal, w = plane distance
           flags: vec4<u32>,             // x = isSelected, y = sectionEnabled, z = edgeEnabled, w = edgeIntensityMilli
+          selectedState: vec4<u32>,     // x = selectedEntityId, y = hasSelectedEntity
         }
         @binding(0) @group(0) var<uniform> uniforms: Uniforms;
 
@@ -95,6 +96,8 @@ export const mainShaderSource = `
 
         @fragment
         fn fs_main(input: VertexOutput) -> FragmentOutput {
+          let entitySelected = uniforms.selectedState.y == 1u && input.entityId == uniforms.selectedState.x;
+
           // Section plane clipping - discard fragments ABOVE the plane
           // For Down axis (normal +Y), keeps everything below cut height (look down into building)
           if (uniforms.flags.y == 1u) {
@@ -146,7 +149,7 @@ export const mainShaderSource = `
           var color = baseColor * (ambient + diffuseSun + diffuseFill + rim);
 
           // Selection highlight - add glow/fresnel effect
-          if (uniforms.flags.x == 1u) {
+          if (uniforms.flags.x == 1u || entitySelected) {
             let V = normalize(-input.worldPos);
             let NdotV = max(dot(N, V), 0.0);
             let fresnel = pow(1.0 - NdotV, 2.0);
@@ -159,8 +162,8 @@ export const mainShaderSource = `
           // blue highlight, making it appear white instead of blue.
           // Also force alpha to 1.0 for selected objects so the highlight is
           // fully opaque (the selection pipeline has no alpha blending).
-          var finalAlpha = select(uniforms.baseColor.a, 1.0, uniforms.flags.x == 1u);
-          if (finalAlpha < 0.99 && uniforms.flags.x != 1u) {
+          var finalAlpha = select(uniforms.baseColor.a, 1.0, uniforms.flags.x == 1u || entitySelected);
+          if (finalAlpha < 0.99 && uniforms.flags.x != 1u && !entitySelected) {
             // Calculate view direction for fresnel
             let V = normalize(-input.worldPos);
             let NdotV = max(dot(N, V), 0.0);

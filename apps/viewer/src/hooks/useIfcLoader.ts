@@ -14,7 +14,7 @@ import { useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore } from '../store.js';
 import { IfcParser, detectFormat, parseIfcx, type IfcDataStore } from '@ifc-lite/parser';
-import { buildHugeGeometryChunks, GeometryProcessor, GeometryQuality, type CoordinateInfo, type HugeGeometryChunk, type HugeGeometryStats, type MeshData } from '@ifc-lite/geometry';
+import { buildHugeGeometryChunks, GeometryProcessor, GeometryQuality, ZeroCopyMeshCollector, type CoordinateInfo, type HugeGeometryChunk, type HugeGeometryStats, type MeshData } from '@ifc-lite/geometry';
 import { buildSpatialIndexGuarded } from '../utils/loadingUtils.js';
 import { type GeometryData, loadGLBToMeshData } from '@ifc-lite/cache';
 
@@ -33,6 +33,7 @@ import { useIfcCache, getCached } from './useIfcCache.js';
 
 // Server hook
 import { useIfcServer } from './useIfcServer.js';
+import { getGlobalRenderer } from './useBCF.js';
 
 // Import IfcxDataStore type from federation hook
 import type { IfcxDataStore } from './useIfcFederation.js';
@@ -128,6 +129,26 @@ function buildHugeGeometryStatsFromChunks(chunks: HugeGeometryChunk[]): HugeGeom
   };
 }
 
+function updateHugeBoundsFromEntity(
+  bounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null,
+  entry: { boundsMin: [number, number, number]; boundsMax: [number, number, number] },
+): { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } {
+  if (!bounds) {
+    return {
+      min: { x: entry.boundsMin[0], y: entry.boundsMin[1], z: entry.boundsMin[2] },
+      max: { x: entry.boundsMax[0], y: entry.boundsMax[1], z: entry.boundsMax[2] },
+    };
+  }
+
+  bounds.min.x = Math.min(bounds.min.x, entry.boundsMin[0]);
+  bounds.min.y = Math.min(bounds.min.y, entry.boundsMin[1]);
+  bounds.min.z = Math.min(bounds.min.z, entry.boundsMin[2]);
+  bounds.max.x = Math.max(bounds.max.x, entry.boundsMax[0]);
+  bounds.max.y = Math.max(bounds.max.y, entry.boundsMax[1]);
+  bounds.max.z = Math.max(bounds.max.z, entry.boundsMax[2]);
+  return bounds;
+}
+
 /**
  * Hook providing file loading operations for single-model path
  * Includes binary cache support for fast subsequent loads
@@ -143,6 +164,7 @@ export function useIfcLoader() {
     setProgress,
     setIfcDataStore,
     setGeometryResult,
+    setHugeGeometryState,
     appendHugeGeometryChunks,
     appendGeometryBatch,
     updateMeshColors,
@@ -153,6 +175,7 @@ export function useIfcLoader() {
     setProgress: s.setProgress,
     setIfcDataStore: s.setIfcDataStore,
     setGeometryResult: s.setGeometryResult,
+    setHugeGeometryState: s.setHugeGeometryState,
     appendHugeGeometryChunks: s.appendHugeGeometryChunks,
     appendGeometryBatch: s.appendGeometryBatch,
     updateMeshColors: s.updateMeshColors,
@@ -459,6 +482,17 @@ export function useIfcLoader() {
       const hugeTargetChunkBytes = preferHugeBatches && buffer.byteLength >= 512 * 1024 * 1024
         ? 64 * 1024 * 1024
         : undefined;
+      const renderer = getGlobalRenderer();
+      const rendererDevice = renderer?.getGPUDevice();
+      const rendererPipeline = renderer?.getPipeline();
+      const zeroCopyApi = geometryProcessor.getApi();
+      const useZeroCopyGeometry = Boolean(
+        preferHugeBatches &&
+        renderer &&
+        rendererDevice &&
+        rendererPipeline &&
+        zeroCopyApi
+      );
 
       try {
         // Use dynamic batch sizing for optimal throughput
@@ -475,235 +509,264 @@ export function useIfcLoader() {
           },
           hasLargeCoordinates: false,
         };
+        estimatedTotal = buffer.byteLength / 1000;
+        if (useZeroCopyGeometry && renderer && zeroCopyApi) {
+          const decoder = new TextDecoder();
+          const content = decoder.decode(new Uint8Array(buffer));
+          const collector = new ZeroCopyMeshCollector(zeroCopyApi, content);
+          const entityInfoMap = new Map<number, import('@ifc-lite/geometry').HugeGeometryEntityInfo>();
+          let zeroCopyBounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null = null;
+          let zeroCopyStats: HugeGeometryStats = {
+            totalBatches: 0,
+            totalElements: 0,
+            totalVertices: 0,
+            totalTriangles: 0,
+          };
+          const zeroCopyBatchSize = fileSizeMB < 50 ? 128 : fileSizeMB < 250 ? 384 : fileSizeMB < 600 ? 768 : 1536;
 
-        for await (const event of geometryProcessor.processAdaptive(new Uint8Array(buffer), {
-          sizeThreshold: 2 * 1024 * 1024, // 2MB threshold
-          batchSize: dynamicBatchConfig, // Dynamic batches: small first, then large
-          preferHugeBatches,
-          targetChunkBytes: hugeTargetChunkBytes,
-        })) {
-          const eventReceived = performance.now();
+          setProgress({ phase: 'Processing geometry', percent: 50 });
+          modelOpenMs = performance.now() - totalStartTime;
+          setGeometryResult({
+            meshes: [],
+            totalTriangles: 0,
+            totalVertices: 0,
+            coordinateInfo: emptyCoordinateInfo,
+          });
+          setHugeGeometryState(true, zeroCopyStats, entityInfoMap);
+          renderer.getScene().clear();
+          renderer.getCamera().reset();
+          console.log(`[useIfc] Model opened at ${modelOpenMs.toFixed(0)}ms`);
 
-          switch (event.type) {
-            case 'start':
-              estimatedTotal = event.totalEstimate;
-              break;
-            case 'model-open':
-              setProgress({ phase: 'Processing geometry', percent: 50 });
-              modelOpenMs = performance.now() - totalStartTime;
-              if (preferHugeBatches) {
-                setGeometryResult({
-                  meshes: [],
-                  totalTriangles: 0,
-                  totalVertices: 0,
-                  coordinateInfo: emptyCoordinateInfo,
-                });
-              }
-              console.log(`[useIfc] Model opened at ${modelOpenMs.toFixed(0)}ms`);
-              break;
-            case 'colorUpdate': {
-              // Accumulate color updates locally during streaming.
-              // We apply them in a single pass at 'complete' instead of
-              // calling updateMeshColors() per event (which triggers a
-              // React reconciliation each time + O(n) scan over all meshes).
-              for (const [expressId, color] of event.updates) {
-                cumulativeColorUpdates.set(expressId, color);
-              }
-              // Keep local mesh snapshots in sync for cache serialization.
-              applyColorUpdatesToMeshes(allMeshes, event.updates);
-              applyColorUpdatesToMeshes(pendingMeshes, event.updates);
-              break;
+          for await (const batch of collector.streamBatches(zeroCopyBatchSize)) {
+            if (loadSessionRef.current !== currentSession) {
+              batch.free();
+              return;
             }
-            case 'rtcOffset': {
-              // Capture RTC offset from WASM for multi-model alignment
-              if (event.hasRtc) {
-                capturedRtcOffset = event.rtcOffset;
-              }
-              break;
+
+            batchCount++;
+            usedHugeStreaming = true;
+            zeroCopyStats = {
+              totalBatches: zeroCopyStats.totalBatches + 1,
+              totalElements: zeroCopyStats.totalElements + batch.meshMetadata.length,
+              totalVertices: zeroCopyStats.totalVertices + batch.stats.vertexCount,
+              totalTriangles: zeroCopyStats.totalTriangles + batch.stats.triangleCount,
+            };
+
+            for (const meta of batch.meshMetadata) {
+              entityInfoMap.set(meta.expressId, {
+                expressId: meta.expressId,
+                ifcType: meta.ifcType,
+                color: meta.color,
+                boundsMin: meta.boundsMin,
+                boundsMax: meta.boundsMax,
+              });
+              zeroCopyBounds = updateHugeBoundsFromEntity(zeroCopyBounds, meta);
             }
-            case 'batch': {
-              batchCount++;
 
-              // Track time to first geometry
-              if (batchCount === 1) {
-                firstGeometryTime = performance.now() - totalStartTime;
-                console.log(`[useIfc] Batch #1: ${event.meshes.length} meshes, wait: ${firstGeometryTime.toFixed(0)}ms`);
+            renderer.addZeroCopyGeometryBatch(batch);
+
+            finalHugeStats = zeroCopyStats;
+            totalMeshes = zeroCopyStats.totalElements;
+            lastTotalMeshes = zeroCopyStats.totalElements;
+            finalCoordinateInfo = zeroCopyBounds ? createCoordinateInfo(zeroCopyBounds) : emptyCoordinateInfo;
+            setHugeGeometryState(true, zeroCopyStats, entityInfoMap);
+            updateCoordinateInfo(finalCoordinateInfo);
+
+            if (batchCount === 1) {
+              firstGeometryTime = performance.now() - totalStartTime;
+              console.log(`[useIfc] Batch #1: ${batch.meshMetadata.length} meshes, wait: ${firstGeometryTime.toFixed(0)}ms`);
+              if (finalCoordinateInfo?.shiftedBounds) {
+                renderer.getCamera().fitToBounds(
+                  finalCoordinateInfo.shiftedBounds.min,
+                  finalCoordinateInfo.shiftedBounds.max,
+                );
+              } else {
+                renderer.fitToView();
               }
+            }
 
+            renderer.requestRender();
+            const progressPercent = 50 + Math.min(45, (totalMeshes / Math.max(estimatedTotal / 10, totalMeshes)) * 45);
+            setProgress({
+              phase: `Rendering geometry (${totalMeshes} meshes)`,
+              percent: progressPercent,
+            });
+          }
 
-              // Collect meshes for BVH building (use loop to avoid stack overflow with large batches)
-              for (let i = 0; i < event.meshes.length; i++) allMeshes.push(event.meshes[i]);
-              finalCoordinateInfo = event.coordinateInfo ?? null;
-              totalMeshes = event.totalSoFar;
-              lastTotalMeshes = event.totalSoFar;
+          setProgress({ phase: 'Complete', percent: 100 });
+          console.log(
+            `[useIfc] Geometry streaming complete: ${zeroCopyStats.totalBatches} zero-copy batches, ` +
+            `${zeroCopyStats.totalElements} elements`
+          );
+        } else {
+          for await (const event of geometryProcessor.processAdaptive(new Uint8Array(buffer), {
+            sizeThreshold: 2 * 1024 * 1024, // 2MB threshold
+            batchSize: dynamicBatchConfig, // Dynamic batches: small first, then large
+            preferHugeBatches,
+            targetChunkBytes: hugeTargetChunkBytes,
+          })) {
+            const eventReceived = performance.now();
 
-              // Accumulate meshes for batched rendering
-              for (let i = 0; i < event.meshes.length; i++) pendingMeshes.push(event.meshes[i]);
-
-              // FIRST BATCH: Render immediately for fast first frame
-              // SUBSEQUENT: Throttle to reduce React re-renders
-              const timeSinceLastRender = eventReceived - lastRenderTime;
-              const shouldRender = batchCount === 1 || timeSinceLastRender >= RENDER_INTERVAL_MS;
-
-              if (shouldRender && pendingMeshes.length > 0) {
-                appendGeometryBatch(pendingMeshes, event.coordinateInfo);
-                pendingMeshes = [];
-                lastRenderTime = eventReceived;
-
-                // Update progress
+            switch (event.type) {
+              case 'start':
+                estimatedTotal = event.totalEstimate;
+                break;
+              case 'model-open':
+                setProgress({ phase: 'Processing geometry', percent: 50 });
+                modelOpenMs = performance.now() - totalStartTime;
+                if (preferHugeBatches) {
+                  setGeometryResult({
+                    meshes: [],
+                    totalTriangles: 0,
+                    totalVertices: 0,
+                    coordinateInfo: emptyCoordinateInfo,
+                  });
+                }
+                console.log(`[useIfc] Model opened at ${modelOpenMs.toFixed(0)}ms`);
+                break;
+              case 'colorUpdate': {
+                for (const [expressId, color] of event.updates) {
+                  cumulativeColorUpdates.set(expressId, color);
+                }
+                applyColorUpdatesToMeshes(allMeshes, event.updates);
+                applyColorUpdatesToMeshes(pendingMeshes, event.updates);
+                break;
+              }
+              case 'rtcOffset': {
+                if (event.hasRtc) {
+                  capturedRtcOffset = event.rtcOffset;
+                }
+                break;
+              }
+              case 'batch': {
+                batchCount++;
+                if (batchCount === 1) {
+                  firstGeometryTime = performance.now() - totalStartTime;
+                  console.log(`[useIfc] Batch #1: ${event.meshes.length} meshes, wait: ${firstGeometryTime.toFixed(0)}ms`);
+                }
+                for (let i = 0; i < event.meshes.length; i++) allMeshes.push(event.meshes[i]);
+                finalCoordinateInfo = event.coordinateInfo ?? null;
+                totalMeshes = event.totalSoFar;
+                lastTotalMeshes = event.totalSoFar;
+                for (let i = 0; i < event.meshes.length; i++) pendingMeshes.push(event.meshes[i]);
+                const timeSinceLastRender = eventReceived - lastRenderTime;
+                const shouldRender = batchCount === 1 || timeSinceLastRender >= RENDER_INTERVAL_MS;
+                if (shouldRender && pendingMeshes.length > 0) {
+                  appendGeometryBatch(pendingMeshes, event.coordinateInfo);
+                  pendingMeshes = [];
+                  lastRenderTime = eventReceived;
+                  const progressPercent = 50 + Math.min(45, (totalMeshes / Math.max(estimatedTotal / 10, totalMeshes)) * 45);
+                  setProgress({
+                    phase: `Rendering geometry (${totalMeshes} meshes)`,
+                    percent: progressPercent
+                  });
+                }
+                break;
+              }
+              case 'huge-batch': {
+                batchCount++;
+                usedHugeStreaming = true;
+                if (batchCount === 1) {
+                  firstGeometryTime = performance.now() - totalStartTime;
+                  console.log(
+                    `[useIfc] Batch #1: ${event.chunks[0]?.elements.length ?? 0} meshes, ` +
+                    `wait: ${firstGeometryTime.toFixed(0)}ms`
+                  );
+                }
+                finalCoordinateInfo = event.coordinateInfo ?? null;
+                finalHugeStats = event.stats;
+                totalMeshes = event.totalSoFar;
+                lastTotalMeshes = event.totalSoFar;
+                if (retainHugeChunksForFallback) {
+                  retainedHugeChunks.push(...event.chunks);
+                }
+                appendHugeGeometryChunks(event.chunks, event.stats);
+                if (event.coordinateInfo) {
+                  updateCoordinateInfo(event.coordinateInfo);
+                }
                 const progressPercent = 50 + Math.min(45, (totalMeshes / Math.max(estimatedTotal / 10, totalMeshes)) * 45);
                 setProgress({
                   phase: `Rendering geometry (${totalMeshes} meshes)`,
                   percent: progressPercent
                 });
+                break;
               }
-
-              break;
-            }
-            case 'huge-batch': {
-              batchCount++;
-              usedHugeStreaming = true;
-
-              if (batchCount === 1) {
-                firstGeometryTime = performance.now() - totalStartTime;
+              case 'complete':
+                if (pendingMeshes.length > 0) {
+                  appendGeometryBatch(pendingMeshes, event.coordinateInfo);
+                  pendingMeshes = [];
+                }
+                finalCoordinateInfo = event.coordinateInfo ?? null;
+                if (cumulativeColorUpdates.size > 0) {
+                  updateMeshColors(cumulativeColorUpdates);
+                }
+                if (finalCoordinateInfo && capturedRtcOffset) {
+                  finalCoordinateInfo.wasmRtcOffset = capturedRtcOffset;
+                }
+                updateCoordinateInfo(finalCoordinateInfo);
+                setProgress({ phase: 'Complete', percent: 100 });
+                console.log(`[useIfc] Geometry streaming complete: ${batchCount} batches, ${lastTotalMeshes} meshes`);
+                dataStorePromise.then(dataStore => {
+                  if (loadSessionRef.current !== currentSession) return;
+                  if (usedHugeStreaming) return;
+                  buildSpatialIndexGuarded(allMeshes, dataStore, setIfcDataStore);
+                  if (
+                    buffer.byteLength >= CACHE_SIZE_THRESHOLD &&
+                    buffer.byteLength <= CACHE_MAX_SOURCE_SIZE &&
+                    allMeshes.length > 0 &&
+                    finalCoordinateInfo
+                  ) {
+                    applyColorUpdatesToMeshes(allMeshes, cumulativeColorUpdates);
+                    const geometryData: GeometryData = {
+                      meshes: allMeshes,
+                      totalVertices: allMeshes.reduce((sum, m) => sum + m.positions.length / 3, 0),
+                      totalTriangles: allMeshes.reduce((sum, m) => sum + m.indices.length / 3, 0),
+                      coordinateInfo: finalCoordinateInfo,
+                    };
+                    saveToCache(cacheKey, dataStore, geometryData, buffer, file.name);
+                  }
+                }).catch(err => {
+                  console.warn('[useIfc] Skipping spatial index/cache - data model unavailable:', err);
+                });
+                break;
+              case 'huge-complete':
+                finalCoordinateInfo = event.coordinateInfo ?? null;
+                finalHugeStats = event.stats;
+                if (cumulativeColorUpdates.size > 0) {
+                  updateMeshColors(cumulativeColorUpdates);
+                }
+                if (finalCoordinateInfo && capturedRtcOffset) {
+                  finalCoordinateInfo.wasmRtcOffset = capturedRtcOffset;
+                }
+                updateCoordinateInfo(finalCoordinateInfo);
+                setProgress({ phase: 'Complete', percent: 100 });
                 console.log(
-                  `[useIfc] Batch #1: ${event.chunks[0]?.elements.length ?? 0} meshes, ` +
-                  `wait: ${firstGeometryTime.toFixed(0)}ms`
+                  `[useIfc] Geometry streaming complete: ${event.stats.totalBatches} huge batches, ` +
+                  `${event.stats.totalElements} elements`
                 );
-              }
-
-              finalCoordinateInfo = event.coordinateInfo ?? null;
-              finalHugeStats = event.stats;
-              totalMeshes = event.totalSoFar;
-              lastTotalMeshes = event.totalSoFar;
-              if (retainHugeChunksForFallback) {
-                retainedHugeChunks.push(...event.chunks);
-              }
-
-              appendHugeGeometryChunks(event.chunks, event.stats);
-              if (event.coordinateInfo) {
-                updateCoordinateInfo(event.coordinateInfo);
-              }
-
-              const progressPercent = 50 + Math.min(45, (totalMeshes / Math.max(estimatedTotal / 10, totalMeshes)) * 45);
-              setProgress({
-                phase: `Rendering geometry (${totalMeshes} meshes)`,
-                percent: progressPercent
-              });
-              break;
+                dataStorePromise.then(dataStore => {
+                  if (loadSessionRef.current !== currentSession) return;
+                  if (!retainHugeChunksForFallback || retainedHugeChunks.length === 0 || !finalCoordinateInfo) {
+                    return;
+                  }
+                  const reconstructedMeshes = reconstructMeshesFromHugeChunks(retainedHugeChunks);
+                  applyColorUpdatesToMeshes(reconstructedMeshes, cumulativeColorUpdates);
+                  buildSpatialIndexGuarded(reconstructedMeshes, dataStore, setIfcDataStore);
+                  if (buffer.byteLength >= CACHE_SIZE_THRESHOLD && buffer.byteLength <= CACHE_MAX_SOURCE_SIZE) {
+                    const geometryData: GeometryData = {
+                      meshes: reconstructedMeshes,
+                      totalVertices: reconstructedMeshes.reduce((sum, mesh) => sum + (mesh.positions.length / 3), 0),
+                      totalTriangles: reconstructedMeshes.reduce((sum, mesh) => sum + (mesh.indices.length / 3), 0),
+                      coordinateInfo: finalCoordinateInfo,
+                    };
+                    saveToCache(cacheKey, dataStore, geometryData, buffer, file.name);
+                  }
+                }).catch(err => {
+                  console.warn('[useIfc] Skipping spatial index/cache - data model unavailable:', err);
+                });
+                break;
             }
-            case 'complete':
-              // Flush any remaining pending meshes
-              if (pendingMeshes.length > 0) {
-                appendGeometryBatch(pendingMeshes, event.coordinateInfo);
-                pendingMeshes = [];
-              }
-
-              finalCoordinateInfo = event.coordinateInfo ?? null;
-
-              // Data model parsing already started in parallel (see above).
-              // No need to start it here — it runs concurrently with geometry.
-
-              // Apply all accumulated color updates in a single store update
-              // instead of one updateMeshColors() call per colorUpdate event.
-              if (cumulativeColorUpdates.size > 0) {
-                updateMeshColors(cumulativeColorUpdates);
-              }
-
-              // Store captured RTC offset in coordinate info for multi-model alignment
-              if (finalCoordinateInfo && capturedRtcOffset) {
-                finalCoordinateInfo.wasmRtcOffset = capturedRtcOffset;
-              }
-
-              // Update geometry result with final coordinate info
-              updateCoordinateInfo(finalCoordinateInfo);
-
-              setProgress({ phase: 'Complete', percent: 100 });
-              console.log(`[useIfc] Geometry streaming complete: ${batchCount} batches, ${lastTotalMeshes} meshes`);
-
-              // Build spatial index and cache in background (non-blocking)
-              // Wait for data model to complete first
-              dataStorePromise.then(dataStore => {
-                // Guard: skip if user loaded a new file since this load started
-                if (loadSessionRef.current !== currentSession) return;
-                if (usedHugeStreaming) return;
-                // Build spatial index from meshes in time-sliced chunks (non-blocking).
-                // Previously this was synchronous inside requestIdleCallback, blocking
-                // the main thread for seconds on 200K+ mesh models (190M+ float reads
-                // for bounds computation alone).
-                buildSpatialIndexGuarded(allMeshes, dataStore, setIfcDataStore);
-
-                // Cache the result in the background (files between 10 MB and 150 MB).
-                // Files above CACHE_MAX_SOURCE_SIZE are not cached because the
-                // source buffer is required for on-demand property/quantity
-                // extraction, spatial hierarchy elevations, and IFC re-export.
-                // Caching without it would silently degrade those features.
-                if (
-                  buffer.byteLength >= CACHE_SIZE_THRESHOLD &&
-                  buffer.byteLength <= CACHE_MAX_SOURCE_SIZE &&
-                  allMeshes.length > 0 &&
-                  finalCoordinateInfo
-                ) {
-                  // Final safety pass so cache always contains post-style colors.
-                  applyColorUpdatesToMeshes(allMeshes, cumulativeColorUpdates);
-                  const geometryData: GeometryData = {
-                    meshes: allMeshes,
-                    totalVertices: allMeshes.reduce((sum, m) => sum + m.positions.length / 3, 0),
-                    totalTriangles: allMeshes.reduce((sum, m) => sum + m.indices.length / 3, 0),
-                    coordinateInfo: finalCoordinateInfo,
-                  };
-                  saveToCache(cacheKey, dataStore, geometryData, buffer, file.name);
-                }
-              }).catch(err => {
-                // Data model parsing failed - spatial index and caching skipped
-                console.warn('[useIfc] Skipping spatial index/cache - data model unavailable:', err);
-              });
-              break;
-            case 'huge-complete':
-              finalCoordinateInfo = event.coordinateInfo ?? null;
-              finalHugeStats = event.stats;
-
-              if (cumulativeColorUpdates.size > 0) {
-                updateMeshColors(cumulativeColorUpdates);
-              }
-
-              if (finalCoordinateInfo && capturedRtcOffset) {
-                finalCoordinateInfo.wasmRtcOffset = capturedRtcOffset;
-              }
-
-              updateCoordinateInfo(finalCoordinateInfo);
-
-              setProgress({ phase: 'Complete', percent: 100 });
-              console.log(
-                `[useIfc] Geometry streaming complete: ${event.stats.totalBatches} huge batches, ` +
-                `${event.stats.totalElements} elements`
-              );
-
-              dataStorePromise.then(dataStore => {
-                if (loadSessionRef.current !== currentSession) return;
-                if (!retainHugeChunksForFallback || retainedHugeChunks.length === 0 || !finalCoordinateInfo) {
-                  return;
-                }
-
-                const reconstructedMeshes = reconstructMeshesFromHugeChunks(retainedHugeChunks);
-                applyColorUpdatesToMeshes(reconstructedMeshes, cumulativeColorUpdates);
-                buildSpatialIndexGuarded(reconstructedMeshes, dataStore, setIfcDataStore);
-
-                if (buffer.byteLength >= CACHE_SIZE_THRESHOLD && buffer.byteLength <= CACHE_MAX_SOURCE_SIZE) {
-                  const geometryData: GeometryData = {
-                    meshes: reconstructedMeshes,
-                    totalVertices: reconstructedMeshes.reduce((sum, mesh) => sum + (mesh.positions.length / 3), 0),
-                    totalTriangles: reconstructedMeshes.reduce((sum, mesh) => sum + (mesh.indices.length / 3), 0),
-                    coordinateInfo: finalCoordinateInfo,
-                  };
-                  saveToCache(cacheKey, dataStore, geometryData, buffer, file.name);
-                }
-              }).catch(err => {
-                console.warn('[useIfc] Skipping spatial index/cache - data model unavailable:', err);
-              });
-              break;
           }
-
         }
       } catch (err) {
         if (loadSessionRef.current !== currentSession) return;
@@ -732,7 +795,7 @@ export function useIfcLoader() {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setLoading(false);
     }
-  }, [setLoading, setError, setProgress, setIfcDataStore, setGeometryResult, appendHugeGeometryChunks, appendGeometryBatch, updateMeshColors, updateCoordinateInfo, loadFromCache, saveToCache, loadFromServer]);
+  }, [setLoading, setError, setProgress, setIfcDataStore, setGeometryResult, setHugeGeometryState, appendHugeGeometryChunks, appendGeometryBatch, updateMeshColors, updateCoordinateInfo, loadFromCache, saveToCache, loadFromServer]);
 
   return { loadFile };
 }

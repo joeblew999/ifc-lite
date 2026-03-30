@@ -52,6 +52,9 @@ export interface ZeroCopyMeshMetadata {
   indexOffset: number;
   indexCount: number;
   color: [number, number, number, number];
+  ifcType?: string;
+  boundsMin: [number, number, number];
+  boundsMax: [number, number, number];
 }
 
 /**
@@ -178,6 +181,9 @@ export class ZeroCopyMeshCollector {
               indexOffset: meta.indexOffset,
               indexCount: meta.indexCount,
               color: meta.color as [number, number, number, number],
+              ifcType: gpuGeom.getIfcTypeName(meta.ifcTypeIdx),
+              boundsMin: meta.boundsMin as [number, number, number],
+              boundsMax: meta.boundsMax as [number, number, number],
             });
           }
         }
@@ -241,6 +247,9 @@ export class ZeroCopyMeshCollector {
           indexOffset: meta.indexOffset,
           indexCount: meta.indexCount,
           color: meta.color as [number, number, number, number],
+          ifcType: gpuGeom.getIfcTypeName(meta.ifcTypeIdx),
+          boundsMin: meta.boundsMin as [number, number, number],
+          boundsMax: meta.boundsMax as [number, number, number],
         });
       }
     }

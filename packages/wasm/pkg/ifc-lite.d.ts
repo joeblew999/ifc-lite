@@ -189,6 +189,8 @@ export class GpuMeshMetadata {
   private constructor();
   free(): void;
   [Symbol.dispose](): void;
+  readonly boundsMax: Float32Array;
+  readonly boundsMin: Float32Array;
   readonly expressId: number;
   readonly indexCount: number;
   readonly ifcTypeIdx: number;
@@ -1038,6 +1040,8 @@ export interface InitOutput {
   readonly gpuinstancedgeometrycollection_get: (a: number, b: number) => number;
   readonly gpuinstancedgeometrycollection_length: (a: number) => number;
   readonly gpuinstancedgeometrycollection_new: () => number;
+  readonly gpumeshmetadata_boundsMax: (a: number, b: number) => void;
+  readonly gpumeshmetadata_boundsMin: (a: number, b: number) => void;
   readonly gpumeshmetadata_color: (a: number, b: number) => void;
   readonly gpumeshmetadata_expressId: (a: number) => number;
   readonly gpumeshmetadata_ifcTypeIdx: (a: number) => number;
@@ -1177,9 +1181,9 @@ export interface InitOutput {
   readonly profileentryjs_expressId: (a: number) => number;
   readonly symboliccircle_expressId: (a: number) => number;
   readonly __wbg_gpuinstancedgeometryref_free: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_1127: (a: number, b: number, c: number) => void;
-  readonly __wasm_bindgen_func_elem_1126: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_1167: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_1132: (a: number, b: number, c: number) => void;
+  readonly __wasm_bindgen_func_elem_1131: (a: number, b: number) => void;
+  readonly __wasm_bindgen_func_elem_1174: (a: number, b: number, c: number, d: number) => void;
   readonly __wbindgen_export: (a: number) => void;
   readonly __wbindgen_export2: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export3: (a: number, b: number) => number;

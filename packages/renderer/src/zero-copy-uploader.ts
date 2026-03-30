@@ -37,12 +37,16 @@ export interface GpuGeometryData {
   totalTriangleCount: number;
   getMeshMetadata(index: number): {
     expressId: number;
+    ifcTypeIdx: number;
     vertexOffset: number;
     vertexCount: number;
     indexOffset: number;
     indexCount: number;
     color: number[];
+    boundsMin: number[];
+    boundsMax: number[];
   } | undefined;
+  getIfcTypeName(index: number): string | undefined;
   free(): void;
 }
 
@@ -76,6 +80,9 @@ export interface ZeroCopyMeshMetadata {
   indexOffset: number;
   indexCount: number;
   color: [number, number, number, number];
+  ifcType?: string;
+  boundsMin: [number, number, number];
+  boundsMax: [number, number, number];
 }
 
 /**
@@ -192,6 +199,9 @@ export class ZeroCopyGpuUploader {
           indexOffset: meta.indexOffset,
           indexCount: meta.indexCount,
           color: meta.color as [number, number, number, number],
+          ifcType: geometry.getIfcTypeName(meta.ifcTypeIdx),
+          boundsMin: meta.boundsMin as [number, number, number],
+          boundsMax: meta.boundsMax as [number, number, number],
         });
       }
     }

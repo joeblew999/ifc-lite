@@ -72,112 +72,27 @@ export class PickingManager {
         }
 
         let meshes = this.scene.getMeshes();
-        const batchedMeshes = this.scene.getBatchedMeshes();
+        let batchedMeshes = this.scene.getBatchedMeshes();
 
-        // If we have batched meshes, check if we need CPU raycasting
-        // This handles the case where we have SOME individual meshes (e.g., from highlighting)
-        // but not enough for full GPU picking coverage
-        if (batchedMeshes.length > 0) {
-            // Collect all expressIds from batched meshes
-            const expressIds = new Set<number>();
-            for (const batch of batchedMeshes) {
-                for (const expressId of batch.expressIds) {
-                    expressIds.add(expressId);
-                }
-            }
-
-            // Track how many individual mesh pieces already exist for each (expressId:modelIndex).
-            // Multi-piece elements (windows/doors with submeshes) need all pieces for reliable picking.
-            const existingPieceCounts = new Map<string, number>();
-            for (const mesh of meshes) {
-                const key = `${mesh.expressId}:${mesh.modelIndex ?? 'any'}`;
-                existingPieceCounts.set(key, (existingPieceCounts.get(key) ?? 0) + 1);
-            }
-
-            // Build required piece counts from MeshData for all visible entities.
-            const requiredPieceCounts = new Map<string, number>();
-            const visibleExpressIds: number[] = [];
-            for (const expressId of expressIds) {
-                if (options?.hiddenIds?.has(expressId)) continue;
-                if (options?.isolatedIds !== null && options?.isolatedIds !== undefined && !options.isolatedIds.has(expressId)) continue;
-                visibleExpressIds.push(expressId);
-
-                const pieces = this.scene.getMeshDataPieces(expressId);
-                if (!pieces) continue;
-                for (const piece of pieces) {
-                    if (options?.visibleModelIndices !== null && options?.visibleModelIndices !== undefined && piece.modelIndex !== undefined && !options.visibleModelIndices.has(piece.modelIndex)) continue;
-                    const key = `${piece.expressId}:${piece.modelIndex ?? 'any'}`;
-                    requiredPieceCounts.set(key, (requiredPieceCounts.get(key) ?? 0) + 1);
-                }
-            }
-
-            // Count how many meshes we'd need to create for full GPU picking
-            // For multi-model and multi-piece elements, count missing piece instances per key.
-            let toCreate = 0;
-            for (const [key, requiredCount] of requiredPieceCounts) {
-                const existingCount = existingPieceCounts.get(key) ?? 0;
-                if (requiredCount > existingCount) {
-                    toCreate += requiredCount - existingCount;
-                }
-            }
-
-            // PERFORMANCE FIX: Use CPU raycasting for large models instead of creating GPU meshes
-            // GPU picking requires individual mesh buffers; for 60K+ elements this is too slow
-            // CPU raycasting uses bounding box filtering + triangle tests - no GPU buffers needed
-            const MAX_PICK_MESH_CREATION = 500;
-            if (toCreate > MAX_PICK_MESH_CREATION) {
-                // Use CPU raycasting fallback - works regardless of how many individual meshes exist
-                const ray = this.camera.unprojectToRay(scaledX, scaledY, this.canvas.width, this.canvas.height);
-                const hit = this.scene.raycast(ray.origin, ray.direction, options?.hiddenIds, options?.isolatedIds, options?.visibleModelIndices);
-                if (!hit) return null;
-                // CPU raycasting returns expressId and modelIndex
-                return {
-                    expressId: hit.expressId,
-                    modelIndex: hit.modelIndex,
-                };
-            }
-
-            // For smaller models, create GPU meshes for picking
-            // Only create meshes for VISIBLE elements (not hidden, and either no isolation or in isolated set)
-            // For multi-model support: create meshes for ALL (expressId, modelIndex) pairs
-            const baselineExistingCounts = new Map(existingPieceCounts);
-            const seenOrdinalsByKey = new Map<string, number>();
-            for (const expressId of visibleExpressIds) {
-                const pieces = this.scene.getMeshDataPieces(expressId);
-                if (pieces) {
-                    for (const piece of pieces) {
-                        if (options?.visibleModelIndices !== null && options?.visibleModelIndices !== undefined && piece.modelIndex !== undefined && !options.visibleModelIndices.has(piece.modelIndex)) continue;
-                        const meshKey = `${piece.expressId}:${piece.modelIndex ?? 'any'}`;
-                        const ordinal = seenOrdinalsByKey.get(meshKey) ?? 0;
-                        seenOrdinalsByKey.set(meshKey, ordinal + 1);
-                        const baselineExisting = baselineExistingCounts.get(meshKey) ?? 0;
-
-                        // Assume existing pieces correspond to the first N pieces in stable order.
-                        if (ordinal < baselineExisting) continue;
-
-                        this.createMeshFromDataFn(piece);
-                    }
-                }
-            }
-
-            // Get updated meshes list (includes newly created ones)
-            meshes = this.scene.getMeshes();
-        }
-
-        // Apply visibility filtering to meshes before picking
-        // This ensures users can only select elements that are actually visible
         if (options?.hiddenIds && options.hiddenIds.size > 0) {
             meshes = meshes.filter(mesh => !options.hiddenIds!.has(mesh.expressId));
+            batchedMeshes = batchedMeshes.filter(batch => batch.expressIds.some((id) => !options.hiddenIds!.has(id)));
         }
         if (options?.isolatedIds !== null && options?.isolatedIds !== undefined) {
             meshes = meshes.filter(mesh => options.isolatedIds!.has(mesh.expressId));
+            batchedMeshes = batchedMeshes.filter(batch => batch.expressIds.some((id) => options.isolatedIds!.has(id)));
         }
         if (options?.visibleModelIndices !== null && options?.visibleModelIndices !== undefined) {
             meshes = meshes.filter(mesh => mesh.modelIndex === undefined || options.visibleModelIndices!.has(mesh.modelIndex));
+            batchedMeshes = batchedMeshes.filter(batch => batch.modelIndex === undefined || options.visibleModelIndices!.has(batch.modelIndex));
+        }
+
+        const renderables = batchedMeshes.length > 0 ? [...batchedMeshes, ...meshes] : meshes;
+        if (renderables.length === 0) {
+            return null;
         }
 
         const viewProj = this.camera.getViewProjMatrix().m;
-        const result = await this.picker.pick(scaledX, scaledY, this.canvas.width, this.canvas.height, meshes, viewProj);
-        return result;
+        return this.picker.pick(scaledX, scaledY, this.canvas.width, this.canvas.height, renderables, viewProj);
     }
 }

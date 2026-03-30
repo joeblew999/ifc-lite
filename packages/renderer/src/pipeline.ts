@@ -72,12 +72,10 @@ export class RenderPipeline {
             this.multisampleTextureView = this.multisampleTexture.createView();
         }
 
-        // Create uniform buffer for camera matrices, PBR material, and section plane
-        // Layout: viewProj (64 bytes) + model (64 bytes) + baseColor (16 bytes) + metallicRoughness (8 bytes) +
-        //         sectionPlane (16 bytes: vec3 normal + float position) + flags (16 bytes: u32 isSelected + u32 sectionEnabled + padding) = 192 bytes
+        // Create uniform buffer for camera matrices, PBR material, section plane, and selected entity state.
         // WebGPU requires uniform buffers to be aligned to 16 bytes
         this.uniformBuffer = this.device.createBuffer({
-            size: 192, // 12 * 16 bytes = properly aligned
+            size: 208, // 13 * 16 bytes = properly aligned
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
 
@@ -299,9 +297,10 @@ export class RenderPipeline {
     ): void {
         // Create buffer with proper alignment:
         // viewProj (16 floats) + model (16 floats) + baseColor (4 floats) + metallicRoughness (2 floats) + padding (2 floats)
-        // + sectionPlane (4 floats) + flags (4 u32) = 48 floats = 192 bytes
-        const buffer = new Float32Array(48);
+        // + sectionPlane (4 floats) + flags (4 u32) + selectedState (4 u32) = 52 floats = 208 bytes
+        const buffer = new Float32Array(52);
         const flagBuffer = new Uint32Array(buffer.buffer, 176, 4); // flags at byte 176
+        const selectedBuffer = new Uint32Array(buffer.buffer, 192, 4); // selectedState at byte 192
 
         // viewProj: mat4x4<f32> at offset 0 (16 floats)
         buffer.set(viewProj, 0);
@@ -338,6 +337,10 @@ export class RenderPipeline {
         flagBuffer[1] = sectionPlane?.enabled ? 1 : 0; // sectionEnabled
         flagBuffer[2] = 0;                             // reserved
         flagBuffer[3] = 0;                             // reserved
+        selectedBuffer[0] = 0;
+        selectedBuffer[1] = 0;
+        selectedBuffer[2] = 0;
+        selectedBuffer[3] = 0;
 
         // Write the buffer
         this.device.queue.writeBuffer(this.uniformBuffer, 0, buffer);
@@ -441,7 +444,7 @@ export class RenderPipeline {
     }
 
     getUniformBufferSize(): number {
-        return 192; // 48 floats * 4 bytes
+        return 208; // 52 floats * 4 bytes
     }
 
     private destroyed = false;

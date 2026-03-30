@@ -53,6 +53,10 @@ pub struct GpuMeshMetadata {
     index_count: u32,
     /// RGBA color
     color: [f32; 4],
+    /// Axis-aligned bounds min in renderer Y-up space
+    bounds_min: [f32; 3],
+    /// Axis-aligned bounds max in renderer Y-up space
+    bounds_max: [f32; 3],
 }
 
 #[wasm_bindgen]
@@ -91,19 +95,29 @@ impl GpuMeshMetadata {
     pub fn color(&self) -> Vec<f32> {
         self.color.to_vec()
     }
+
+    #[wasm_bindgen(getter, js_name = boundsMin)]
+    pub fn bounds_min(&self) -> Vec<f32> {
+        self.bounds_min.to_vec()
+    }
+
+    #[wasm_bindgen(getter, js_name = boundsMax)]
+    pub fn bounds_max(&self) -> Vec<f32> {
+        self.bounds_max.to_vec()
+    }
 }
 
 /// GPU-ready geometry stored in WASM linear memory
 ///
 /// Data layout:
-/// - vertex_data: Interleaved [px, py, pz, nx, ny, nz, ...] (6 floats per vertex)
+/// - vertex_data: Interleaved [px, py, pz, nx, ny, nz, entityIdBits, ...] (7 floats per vertex)
 /// - indices: Triangle indices [i0, i1, i2, ...]
 /// - mesh_metadata: Per-mesh metadata for draw calls
 ///
 /// All coordinates are pre-converted from IFC Z-up to WebGL Y-up
 #[wasm_bindgen]
 pub struct GpuGeometry {
-    /// Interleaved vertex data: [px, py, pz, nx, ny, nz, ...]
+    /// Interleaved vertex data: [px, py, pz, nx, ny, nz, entityIdBits, ...]
     /// Already converted from Z-up to Y-up
     vertex_data: Vec<f32>,
 
@@ -218,7 +232,7 @@ impl GpuGeometry {
     /// Get total vertex count
     #[wasm_bindgen(getter, js_name = totalVertexCount)]
     pub fn total_vertex_count(&self) -> usize {
-        self.vertex_data.len() / 6 // 6 floats per vertex (pos + normal)
+        self.vertex_data.len() / 7 // 7 floats per vertex (pos + normal + encoded entity id)
     }
 
     /// Get total triangle count
@@ -284,12 +298,16 @@ impl GpuGeometry {
         let ifc_type_idx = self.get_or_add_ifc_type(ifc_type);
 
         // Record current offsets
-        let vertex_offset = (self.vertex_data.len() / 6) as u32;
+        let vertex_offset = (self.vertex_data.len() / 7) as u32;
         let index_offset = self.indices.len() as u32;
 
-        // Interleave positions and normals with coordinate conversion
-        // Layout: [px, py, pz, nx, ny, nz] per vertex
-        self.vertex_data.reserve(vertex_count * 6);
+        // Interleave positions and normals with coordinate conversion.
+        // Layout: [px, py, pz, nx, ny, nz, entityIdBits] per vertex.
+        self.vertex_data.reserve(vertex_count * 7);
+
+        let mut bounds_min = [f32::INFINITY, f32::INFINITY, f32::INFINITY];
+        let mut bounds_max = [f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY];
+        let encoded_entity_id = f32::from_bits(express_id & 0x00FF_FFFF);
 
         for i in 0..vertex_count {
             let pi = i * 3;
@@ -315,6 +333,14 @@ impl GpuGeometry {
             self.vertex_data.push(nx);
             self.vertex_data.push(ny);
             self.vertex_data.push(nz);
+            self.vertex_data.push(encoded_entity_id);
+
+            bounds_min[0] = bounds_min[0].min(px);
+            bounds_min[1] = bounds_min[1].min(py);
+            bounds_min[2] = bounds_min[2].min(pz);
+            bounds_max[0] = bounds_max[0].max(px);
+            bounds_max[1] = bounds_max[1].max(py);
+            bounds_max[2] = bounds_max[2].max(pz);
         }
 
         // Add indices (offset by current vertex count)
@@ -332,6 +358,8 @@ impl GpuGeometry {
             index_offset,
             index_count: indices.len() as u32,
             color,
+            bounds_min,
+            bounds_max,
         });
     }
 

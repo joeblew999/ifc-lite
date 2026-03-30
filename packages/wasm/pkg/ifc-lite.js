@@ -212,12 +212,12 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function __wasm_bindgen_func_elem_1127(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_1127(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_1132(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_1132(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_1167(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1167(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1174(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1174(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const GeoReferenceJsFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -503,7 +503,7 @@ if (Symbol.dispose) GeoReferenceJs.prototype[Symbol.dispose] = GeoReferenceJs.pr
  * GPU-ready geometry stored in WASM linear memory
  *
  * Data layout:
- * - vertex_data: Interleaved [px, py, pz, nx, ny, nz, ...] (6 floats per vertex)
+ * - vertex_data: Interleaved [px, py, pz, nx, ny, nz, entityIdBits, ...] (7 floats per vertex)
  * - indices: Triangle indices [i0, i1, i2, ...]
  * - mesh_metadata: Per-mesh metadata for draw calls
  *
@@ -1014,6 +1014,38 @@ export class GpuMeshMetadata {
     free() {
         const ptr = this.__destroy_into_raw();
         wasm.__wbg_gpumeshmetadata_free(ptr, 0);
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    get boundsMax() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gpumeshmetadata_boundsMax(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export2(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+     * @returns {Float32Array}
+     */
+    get boundsMin() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.gpumeshmetadata_boundsMin(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            var v1 = getArrayF32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_export2(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
     }
     /**
      * @returns {number}
@@ -3049,7 +3081,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wasm_bindgen_func_elem_1167(a, state0.b, arg0, arg1);
+                    return __wasm_bindgen_func_elem_1174(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -3161,9 +3193,9 @@ function __wbg_get_imports() {
         const ret = BigInt.asUintN(64, arg0);
         return addHeapObject(ret);
     };
-    imports.wbg.__wbindgen_cast_8410bcb836a2825d = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 145, function: Function { arguments: [Externref], shim_idx: 146, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_1126, __wasm_bindgen_func_elem_1127);
+    imports.wbg.__wbindgen_cast_46fe3e4a37968b61 = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 146, function: Function { arguments: [Externref], shim_idx: 147, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_1131, __wasm_bindgen_func_elem_1132);
         return addHeapObject(ret);
     };
     imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {

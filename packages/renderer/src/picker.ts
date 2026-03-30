@@ -7,7 +7,10 @@
  */
 
 import { WebGPUDevice } from './device.js';
-import type { Mesh, PickResult } from './types.js';
+import type { BatchedMesh, Mesh, PickResult } from './types.js';
+
+type PickRenderable = Pick<Mesh, 'vertexBuffer' | 'indexBuffer' | 'indexCount' | 'modelIndex'>
+  | Pick<BatchedMesh, 'vertexBuffer' | 'indexBuffer' | 'indexCount' | 'modelIndex'>;
 
 export class Picker {
   private device: GPUDevice;
@@ -15,9 +18,7 @@ export class Picker {
   private depthTexture: GPUTexture;
   private colorTexture: GPUTexture;
   private uniformBuffer: GPUBuffer;
-  private expressIdBuffer: GPUBuffer;
   private bindGroup: GPUBindGroup;
-  private maxMeshes: number = 100000; // Support up to 100K meshes (was 10K)
   private destroyed = false;
 
   constructor(device: WebGPUDevice, width: number = 1, height: number = 1) {
@@ -42,25 +43,19 @@ export class Picker {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
-    // Create storage buffer for expressIds (one u32 per mesh, +1 encoding)
-    // We'll upload all expressIds at once, then use instance_index to look them up
-    this.expressIdBuffer = this.device.createBuffer({
-      size: this.maxMeshes * 4, // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-
-    // Create picker shader that uses storage buffer for per-object expressId
+    // Create picker shader that reads the encoded entityId directly from the
+    // vertex buffer. This works for both individual meshes and batched geometry.
     const shaderModule = this.device.createShaderModule({
       code: `
         struct Uniforms {
           viewProj: mat4x4<f32>,
         }
         @binding(0) @group(0) var<uniform> uniforms: Uniforms;
-        @binding(1) @group(0) var<storage, read> expressIds: array<u32>;
 
         struct VertexInput {
           @location(0) position: vec3<f32>,
           @location(1) normal: vec3<f32>,
+          @location(2) entityId: u32,
         }
 
         struct VertexOutput {
@@ -69,12 +64,10 @@ export class Picker {
         }
 
         @vertex
-        fn vs_main(input: VertexInput, @builtin(instance_index) instanceIndex: u32) -> VertexOutput {
+        fn vs_main(input: VertexInput) -> VertexOutput {
           var output: VertexOutput;
-          // Identity transform - positions are already in world space
           output.position = uniforms.viewProj * vec4<f32>(input.position, 1.0);
-          // Look up expressId from storage buffer using instance index
-          output.objectId = expressIds[instanceIndex];
+          output.objectId = input.entityId;
           return output;
         }
 
@@ -96,6 +89,7 @@ export class Picker {
             attributes: [
               { shaderLocation: 0, offset: 0, format: 'float32x3' },
               { shaderLocation: 1, offset: 12, format: 'float32x3' },
+              { shaderLocation: 2, offset: 24, format: 'uint32' },
             ],
           },
         ],
@@ -125,10 +119,6 @@ export class Picker {
           binding: 0,
           resource: { buffer: this.uniformBuffer },
         },
-        {
-          binding: 1,
-          resource: { buffer: this.expressIdBuffer },
-        },
       ],
     });
   }
@@ -142,7 +132,7 @@ export class Picker {
     y: number,
     width: number,
     height: number,
-    meshes: Mesh[],
+    renderables: PickRenderable[],
     viewProj: Float32Array
   ): Promise<PickResult | null> {
     // Resize textures if needed
@@ -187,37 +177,16 @@ export class Picker {
       },
     });
 
-    // Resize buffer if needed (safety net for very large models)
-    if (meshes.length > this.maxMeshes) {
-      this.resizeExpressIdBuffer(meshes.length);
-    }
-
     // Upload viewProj matrix to uniform buffer (once for all meshes)
     this.device.queue.writeBuffer(this.uniformBuffer, 0, viewProj);
-
-    // Build mesh index array (index + 1, so 0 = no hit)
-    // Using mesh index instead of expressId to properly support multi-model with overlapping expressIds
-    const meshIndexArray = new Uint32Array(meshes.length);
-    for (let i = 0; i < meshes.length; i++) {
-      if (meshes[i]) {
-        meshIndexArray[i] = i + 1;  // +1 so 0 means no hit
-      }
-    }
-    this.device.queue.writeBuffer(this.expressIdBuffer, 0, meshIndexArray);
 
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroup);
 
-    // Draw each mesh with its index as the first instance
-    // The shader will use this instance_index to look up the expressId
-    for (let i = 0; i < meshes.length; i++) {
-      const mesh = meshes[i];
-      if (!mesh) continue;
-
-      pass.setVertexBuffer(0, mesh.vertexBuffer);
-      pass.setIndexBuffer(mesh.indexBuffer, 'uint32');
-      // Draw 1 instance, starting at instance i (so instance_index = i in shader)
-      pass.drawIndexed(mesh.indexCount, 1, 0, 0, i);
+    for (const renderable of renderables) {
+      pass.setVertexBuffer(0, renderable.vertexBuffer);
+      pass.setIndexBuffer(renderable.indexBuffer, 'uint32');
+      pass.drawIndexed(renderable.indexCount, 1, 0, 0, 0);
     }
 
     pass.end();
@@ -251,54 +220,16 @@ export class Picker {
     readBuffer.unmap();
     readBuffer.destroy();
 
-    // meshIndex is (actual index + 1), so 0 = no hit
     if (meshIndex === 0) return null;
 
-    // Look up the mesh to get both expressId and modelIndex
-    const mesh = meshes[meshIndex - 1];
-    if (!mesh) return null;
-
     return {
-      expressId: mesh.expressId,
-      modelIndex: mesh.modelIndex,
+      expressId: meshIndex,
     };
   }
 
   updateUniforms(viewProj: Float32Array): void {
     // Update viewProj matrix only
     this.device.queue.writeBuffer(this.uniformBuffer, 0, viewProj);
-  }
-
-  /**
-   * Resize expressId buffer to accommodate more meshes
-   */
-  private resizeExpressIdBuffer(newSize: number): void {
-    // Destroy old buffer
-    this.expressIdBuffer.destroy();
-
-    // Increase maxMeshes with 50% headroom for future growth
-    this.maxMeshes = Math.ceil(newSize * 1.5);
-
-    // Create new buffer
-    this.expressIdBuffer = this.device.createBuffer({
-      size: this.maxMeshes * 4, // 4 bytes per u32
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-
-    // Recreate bind group with new buffer
-    this.bindGroup = this.device.createBindGroup({
-      layout: this.pipeline.getBindGroupLayout(0),
-      entries: [
-        {
-          binding: 0,
-          resource: { buffer: this.uniformBuffer },
-        },
-        {
-          binding: 1,
-          resource: { buffer: this.expressIdBuffer },
-        },
-      ],
-    });
   }
 
   /**
@@ -312,6 +243,5 @@ export class Picker {
     this.colorTexture.destroy();
     this.depthTexture.destroy();
     this.uniformBuffer.destroy();
-    this.expressIdBuffer.destroy();
   }
 }

@@ -131,7 +131,7 @@ export class WasmMemoryManager {
  * Wraps the WASM GpuGeometry struct for TypeScript use
  */
 export interface GpuGeometryHandle {
-  /** Pointer to interleaved vertex data [px,py,pz,nx,ny,nz,...] */
+  /** Pointer to interleaved vertex data [px,py,pz,nx,ny,nz,entityIdBits,...] */
   vertexDataPtr: number;
   /** Length of vertex data in f32 elements */
   vertexDataLen: number;
@@ -158,6 +158,9 @@ export interface GpuGeometryHandle {
   /** Get metadata for a specific mesh */
   getMeshMetadata(index: number): GpuMeshMetadataHandle | undefined;
 
+  /** Get IFC type name for a metadata type index. */
+  getIfcTypeName(index: number): string | undefined;
+
   /** Free the geometry (allows WASM to reuse memory) */
   free(): void;
 }
@@ -173,6 +176,8 @@ export interface GpuMeshMetadataHandle {
   indexOffset: number;
   indexCount: number;
   color: number[];
+  boundsMin: number[];
+  boundsMax: number[];
 }
 
 /**

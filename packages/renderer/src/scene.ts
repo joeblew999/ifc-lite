@@ -13,6 +13,7 @@ import type {
   HugeGeometryEntityInfo,
   HugeGeometryElementRow,
   HugeGeometryStats,
+  ZeroCopyBatch,
 } from '@ifc-lite/geometry';
 import { MathUtils } from './math.js';
 import type { RenderPipeline } from './pipeline.js';
@@ -78,11 +79,13 @@ export class Scene {
   // ─── Metadata-first huge geometry mode ────────────────────────────────
   private hugeGeometryMode: boolean = false;
   private hugeBatchMap: Map<number, BatchedMesh> = new Map();
+  private hugeBatchStats: Map<number, { vertexCount: number; triangleCount: number }> = new Map();
   private hugeChunkData: Map<number, HugeGeometryChunk> = new Map();
   private hugeEntityRows: Map<number, HugeGeometryElementRow[]> = new Map();
   private hugeEntityInfo: Map<number, HugeGeometryEntityInfo> = new Map();
   private hugeEntityBatchIds: Map<number, number[]> = new Map();
   private hugeGeometryStats: HugeGeometryStats | null = null;
+  private nextMetadataBatchId: number = 1_000_000_000;
 
   // ─── GPU-resident mode ──────────────────────────────────────────────
   // After releaseGeometryData(), JS-side typed arrays are freed.
@@ -511,8 +514,15 @@ export class Scene {
       },
     };
 
+    const triangleCount = chunk.indexCount / 3;
+    const vertexCount = chunk.vertexData.length / chunk.vertexStrideFloats;
+
     this.hugeGeometryMode = true;
     this.hugeBatchMap.set(chunk.batchId, batchedMesh);
+    this.hugeBatchStats.set(chunk.batchId, {
+      vertexCount,
+      triangleCount,
+    });
     this.hugeChunkData.set(chunk.batchId, chunk);
     this.batchedMeshes.push(batchedMesh);
 
@@ -542,8 +552,6 @@ export class Scene {
       });
     }
 
-    const triangleCount = chunk.indexCount / 3;
-    const vertexCount = chunk.vertexData.length / chunk.vertexStrideFloats;
     const prevStats = this.hugeGeometryStats;
     this.hugeGeometryStats = {
       totalBatches: this.hugeBatchMap.size,
@@ -551,6 +559,122 @@ export class Scene {
       totalVertices: (prevStats?.totalVertices ?? 0) + vertexCount,
       totalTriangles: (prevStats?.totalTriangles ?? 0) + triangleCount,
     };
+  }
+
+  appendZeroCopyBatch(batch: ZeroCopyBatch, device: GPUDevice, pipeline: RenderPipeline, modelIndex?: number): void {
+    if (batch.meshMetadata.length === 0) {
+      batch.free();
+      return;
+    }
+
+    const batchId = this.nextMetadataBatchId++;
+    const vertexBuffer = device.createBuffer({
+      size: batch.vertexByteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(vertexBuffer, 0, batch.vertexView);
+
+    const indexBuffer = device.createBuffer({
+      size: batch.indexByteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(indexBuffer, 0, batch.indexView);
+
+    const uniformBuffer = device.createBuffer({
+      size: pipeline.getUniformBufferSize(),
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(),
+      entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
+    });
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    const expressIds: number[] = [];
+    const batchColor = [...batch.meshMetadata[0].color] as [number, number, number, number];
+
+    for (const meta of batch.meshMetadata) {
+      expressIds.push(meta.expressId);
+      minX = Math.min(minX, meta.boundsMin[0]);
+      minY = Math.min(minY, meta.boundsMin[1]);
+      minZ = Math.min(minZ, meta.boundsMin[2]);
+      maxX = Math.max(maxX, meta.boundsMax[0]);
+      maxY = Math.max(maxY, meta.boundsMax[1]);
+      maxZ = Math.max(maxZ, meta.boundsMax[2]);
+
+      const row: HugeGeometryElementRow = {
+        batchId,
+        expressId: meta.expressId,
+        ifcType: meta.ifcType,
+        modelIndex,
+        color: [...meta.color] as [number, number, number, number],
+        vertexOffset: meta.vertexOffset,
+        vertexCount: meta.vertexCount,
+        indexOffset: meta.indexOffset,
+        indexCount: meta.indexCount,
+        boundsMin: [...meta.boundsMin] as [number, number, number],
+        boundsMax: [...meta.boundsMax] as [number, number, number],
+      };
+      const rows = this.hugeEntityRows.get(meta.expressId) ?? [];
+      rows.push(row);
+      this.hugeEntityRows.set(meta.expressId, rows);
+
+      const batchIds = this.hugeEntityBatchIds.get(meta.expressId) ?? [];
+      batchIds.push(batchId);
+      this.hugeEntityBatchIds.set(meta.expressId, batchIds);
+
+      this.hugeEntityInfo.set(meta.expressId, {
+        expressId: meta.expressId,
+        ifcType: meta.ifcType,
+        modelIndex,
+        color: [...meta.color] as [number, number, number, number],
+        boundsMin: [...meta.boundsMin] as [number, number, number],
+        boundsMax: [...meta.boundsMax] as [number, number, number],
+      });
+      this.boundingBoxes.set(meta.expressId, {
+        min: { x: meta.boundsMin[0], y: meta.boundsMin[1], z: meta.boundsMin[2] },
+        max: { x: meta.boundsMax[0], y: meta.boundsMax[1], z: meta.boundsMax[2] },
+      });
+    }
+
+    const batchedMesh: BatchedMesh = {
+      colorKey: `zero:${batchId}`,
+      vertexBuffer,
+      indexBuffer,
+      indexCount: batch.indexView.length,
+      color: batchColor,
+      expressIds,
+      modelIndex,
+      bindGroup,
+      uniformBuffer,
+      bounds: {
+        min: [minX, minY, minZ],
+        max: [maxX, maxY, maxZ],
+      },
+    };
+
+    this.hugeGeometryMode = true;
+    this.hugeBatchMap.set(batchId, batchedMesh);
+    this.hugeBatchStats.set(batchId, {
+      vertexCount: batch.stats.vertexCount,
+      triangleCount: batch.stats.triangleCount,
+    });
+    this.batchedMeshes.push(batchedMesh);
+
+    const prevStats = this.hugeGeometryStats;
+    this.hugeGeometryStats = {
+      totalBatches: this.hugeBatchMap.size,
+      totalElements: this.hugeEntityInfo.size,
+      totalVertices: (prevStats?.totalVertices ?? 0) + batch.stats.vertexCount,
+      totalTriangles: (prevStats?.totalTriangles ?? 0) + batch.stats.triangleCount,
+    };
+
+    batch.free();
   }
 
   isHugeGeometryMode(): boolean {
@@ -604,6 +728,7 @@ export class Scene {
         this.hugeBatchMap.delete(batchId);
       }
       this.hugeChunkData.delete(batchId);
+      this.hugeBatchStats.delete(batchId);
     }
 
     for (const [expressId, rows] of this.hugeEntityRows.entries()) {
@@ -634,11 +759,11 @@ export class Scene {
 
     let totalVertices = 0;
     let totalTriangles = 0;
-    for (const chunk of this.hugeChunkData.values()) {
-      totalVertices += chunk.vertexData.length / chunk.vertexStrideFloats;
-      totalTriangles += chunk.indexCount / 3;
+    for (const stats of this.hugeBatchStats.values()) {
+      totalVertices += stats.vertexCount;
+      totalTriangles += stats.triangleCount;
     }
-    this.hugeGeometryStats = this.hugeChunkData.size === 0
+    this.hugeGeometryStats = this.hugeBatchMap.size === 0
       ? null
       : {
           totalBatches: this.hugeBatchMap.size,
@@ -1635,11 +1760,13 @@ export class Scene {
     this.geometryReleased = false;
     this.hugeGeometryMode = false;
     this.hugeBatchMap.clear();
+    this.hugeBatchStats.clear();
     this.hugeChunkData.clear();
     this.hugeEntityRows.clear();
     this.hugeEntityInfo.clear();
     this.hugeEntityBatchIds.clear();
     this.hugeGeometryStats = null;
+    this.nextMetadataBatchId = 1_000_000_000;
   }
 
   /**
