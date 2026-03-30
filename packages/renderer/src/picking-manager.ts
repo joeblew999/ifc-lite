@@ -105,6 +105,7 @@ export class PickingManager {
                 const pieces = this.scene.getMeshDataPieces(expressId);
                 if (!pieces) continue;
                 for (const piece of pieces) {
+                    if (options?.visibleModelIndices !== null && options?.visibleModelIndices !== undefined && piece.modelIndex !== undefined && !options.visibleModelIndices.has(piece.modelIndex)) continue;
                     const key = `${piece.expressId}:${piece.modelIndex ?? 'any'}`;
                     requiredPieceCounts.set(key, (requiredPieceCounts.get(key) ?? 0) + 1);
                 }
@@ -127,7 +128,7 @@ export class PickingManager {
             if (toCreate > MAX_PICK_MESH_CREATION) {
                 // Use CPU raycasting fallback - works regardless of how many individual meshes exist
                 const ray = this.camera.unprojectToRay(scaledX, scaledY, this.canvas.width, this.canvas.height);
-                const hit = this.scene.raycast(ray.origin, ray.direction, options?.hiddenIds, options?.isolatedIds);
+                const hit = this.scene.raycast(ray.origin, ray.direction, options?.hiddenIds, options?.isolatedIds, options?.visibleModelIndices);
                 if (!hit) return null;
                 // CPU raycasting returns expressId and modelIndex
                 return {
@@ -145,6 +146,7 @@ export class PickingManager {
                 const pieces = this.scene.getMeshDataPieces(expressId);
                 if (pieces) {
                     for (const piece of pieces) {
+                        if (options?.visibleModelIndices !== null && options?.visibleModelIndices !== undefined && piece.modelIndex !== undefined && !options.visibleModelIndices.has(piece.modelIndex)) continue;
                         const meshKey = `${piece.expressId}:${piece.modelIndex ?? 'any'}`;
                         const ordinal = seenOrdinalsByKey.get(meshKey) ?? 0;
                         seenOrdinalsByKey.set(meshKey, ordinal + 1);
@@ -169,6 +171,9 @@ export class PickingManager {
         }
         if (options?.isolatedIds !== null && options?.isolatedIds !== undefined) {
             meshes = meshes.filter(mesh => options.isolatedIds!.has(mesh.expressId));
+        }
+        if (options?.visibleModelIndices !== null && options?.visibleModelIndices !== undefined) {
+            meshes = meshes.filter(mesh => mesh.modelIndex === undefined || options.visibleModelIndices!.has(mesh.modelIndex));
         }
 
         const viewProj = this.camera.getViewProjMatrix().m;

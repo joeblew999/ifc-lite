@@ -14,7 +14,7 @@ import { useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore, type FederatedModel, type SchemaVersion } from '../store.js';
 import { IfcParser, detectFormat, parseIfcx, parseFederatedIfcx, type IfcDataStore, type FederatedIfcxParseResult } from '@ifc-lite/parser';
-import { GeometryProcessor, GeometryQuality, type MeshData, type CoordinateInfo } from '@ifc-lite/geometry';
+import { buildHugeGeometryChunks, GeometryProcessor, GeometryQuality, type CoordinateInfo, type HugeGeometryChunk, type HugeGeometryEntityInfo, type HugeGeometryStats, type MeshData } from '@ifc-lite/geometry';
 import { IfcQuery } from '@ifc-lite/query';
 import { buildSpatialIndexGuarded } from '../utils/loadingUtils.js';
 import { loadGLBToMeshData } from '@ifc-lite/cache';
@@ -78,6 +78,125 @@ function convertIfcxMeshes(rawMeshes: RawIfcxMesh[]): MeshData[] {
   }).filter((m) => m.positions.length > 0 && m.indices.length > 0);
 }
 
+function applyGlobalIdOffsetToHugeChunks(chunks: HugeGeometryChunk[], idOffset: number): void {
+  if (idOffset === 0) return;
+
+  for (const chunk of chunks) {
+    const vertexIds = new Uint32Array(chunk.vertexData.buffer);
+    for (const element of chunk.elements) {
+      const globalId = element.expressId + idOffset;
+      element.expressId = globalId;
+      const start = element.vertexOffset * chunk.vertexStrideFloats + 6;
+      const end = start + element.vertexCount * chunk.vertexStrideFloats;
+      for (let idx = start; idx < end; idx += chunk.vertexStrideFloats) {
+        vertexIds[idx] = globalId >>> 0;
+      }
+    }
+  }
+}
+
+function translateHugeChunks(chunks: HugeGeometryChunk[], dx: number, dy: number, dz: number): void {
+  if (dx === 0 && dy === 0 && dz === 0) return;
+
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.vertexData.length; i += chunk.vertexStrideFloats) {
+      chunk.vertexData[i] -= dx;
+      chunk.vertexData[i + 1] -= dy;
+      chunk.vertexData[i + 2] -= dz;
+    }
+
+    chunk.boundsMin[0] -= dx;
+    chunk.boundsMin[1] -= dy;
+    chunk.boundsMin[2] -= dz;
+    chunk.boundsMax[0] -= dx;
+    chunk.boundsMax[1] -= dy;
+    chunk.boundsMax[2] -= dz;
+
+    for (const element of chunk.elements) {
+      element.boundsMin[0] -= dx;
+      element.boundsMin[1] -= dy;
+      element.boundsMin[2] -= dz;
+      element.boundsMax[0] -= dx;
+      element.boundsMax[1] -= dy;
+      element.boundsMax[2] -= dz;
+    }
+  }
+}
+
+function assignModelIndexToHugeChunks(chunks: HugeGeometryChunk[], modelIndex: number): void {
+  for (const chunk of chunks) {
+    chunk.modelIndex = modelIndex;
+    for (const element of chunk.elements) {
+      element.modelIndex = modelIndex;
+    }
+  }
+}
+
+function buildHugeGeometryEntityInfoMap(chunks: HugeGeometryChunk[]): Map<number, HugeGeometryEntityInfo> {
+  const entities = new Map<number, HugeGeometryEntityInfo>();
+  for (const chunk of chunks) {
+    for (const element of chunk.elements) {
+      entities.set(element.expressId, {
+        expressId: element.expressId,
+        ifcType: element.ifcType,
+        modelIndex: element.modelIndex,
+        color: element.color,
+        boundsMin: [...element.boundsMin] as [number, number, number],
+        boundsMax: [...element.boundsMax] as [number, number, number],
+      });
+    }
+  }
+  return entities;
+}
+
+function buildMergedHugeState(models: ReadonlyMap<string, FederatedModel>): {
+  stats: HugeGeometryStats | null;
+  entities: Map<number, HugeGeometryEntityInfo>;
+} {
+  let totalBatches = 0;
+  let totalElements = 0;
+  let totalVertices = 0;
+  let totalTriangles = 0;
+  const entities = new Map<number, HugeGeometryEntityInfo>();
+
+  for (const model of models.values()) {
+    if (!model.hugeGeometryMode || !model.hugeGeometryStats) continue;
+    totalBatches += model.hugeGeometryStats.totalBatches;
+    totalElements += model.hugeGeometryStats.totalElements;
+    totalVertices += model.hugeGeometryStats.totalVertices;
+    totalTriangles += model.hugeGeometryStats.totalTriangles;
+    for (const [expressId, entity] of model.hugeGeometryEntities ?? new Map<number, HugeGeometryEntityInfo>()) {
+      entities.set(expressId, entity);
+    }
+  }
+
+  if (entities.size === 0) {
+    return { stats: null, entities };
+  }
+
+  return {
+    stats: { totalBatches, totalElements, totalVertices, totalTriangles },
+    entities,
+  };
+}
+
+function buildHugeGeometryStatsFromChunks(chunks: HugeGeometryChunk[]): HugeGeometryStats {
+  let totalVertices = 0;
+  let totalTriangles = 0;
+  let totalElements = 0;
+  for (const chunk of chunks) {
+    totalVertices += chunk.vertexData.length / chunk.vertexStrideFloats;
+    totalTriangles += chunk.indexCount / 3;
+    totalElements += chunk.elements.length;
+  }
+  return {
+    totalBatches: chunks.length,
+    totalElements,
+    totalVertices,
+    totalTriangles,
+  };
+}
+
 /**
  * Hook providing multi-model federation operations
  * Includes addModel, removeModel, federated IFCX loading, overlay management,
@@ -90,6 +209,8 @@ export function useIfcFederation() {
     setProgress,
     setIfcDataStore,
     setGeometryResult,
+    setHugeGeometryState,
+    appendHugeGeometryChunks,
     // Multi-model state and actions
     addModel: storeAddModel,
     removeModel: storeRemoveModel,
@@ -106,6 +227,8 @@ export function useIfcFederation() {
     setProgress: s.setProgress,
     setIfcDataStore: s.setIfcDataStore,
     setGeometryResult: s.setGeometryResult,
+    setHugeGeometryState: s.setHugeGeometryState,
+    appendHugeGeometryChunks: s.appendHugeGeometryChunks,
     addModel: s.addModel,
     removeModel: s.removeModel,
     clearAllModels: s.clearAllModels,
@@ -134,6 +257,11 @@ export function useIfcFederation() {
       const currentModels = useViewerStore.getState().models;
       const currentIfcDataStore = useViewerStore.getState().ifcDataStore;
       const currentGeometryResult = useViewerStore.getState().geometryResult;
+      let nextRenderModelIndex = -1;
+      for (const model of currentModels.values()) {
+        nextRenderModelIndex = Math.max(nextRenderModelIndex, model.renderModelIndex ?? -1);
+      }
+      nextRenderModelIndex += 1;
 
       if (currentModels.size === 0 && currentIfcDataStore && currentGeometryResult) {
         // Migrate the legacy model to the Map
@@ -169,10 +297,13 @@ export function useIfcFederation() {
           fileSize: 0,
           idOffset: legacyOffset,
           maxExpressId: legacyMaxExpressId,
+          renderModelIndex: nextRenderModelIndex++,
         };
         storeAddModel(legacyModel);
         console.log(`[useIfc] Migrated legacy model "${legacyModel.name}" to federation (offset: ${legacyOffset}, maxId: ${legacyMaxExpressId})`);
       }
+
+      const renderModelIndex = nextRenderModelIndex;
 
       setLoading(true);
       setError(null);
@@ -187,6 +318,9 @@ export function useIfcFederation() {
 
       let parsedDataStore: IfcDataStore | null = null;
       let parsedGeometry: { meshes: MeshData[]; totalVertices: number; totalTriangles: number; coordinateInfo: CoordinateInfo } | null = null;
+      let parsedHugeChunks: HugeGeometryChunk[] = [];
+      let parsedHugeStats: HugeGeometryStats | null = null;
+      let parsedHugeEntities: Map<number, HugeGeometryEntityInfo> = new Map();
       let schemaVersion: SchemaVersion = 'IFC4';
 
       // IFCX files must be parsed client-side
@@ -200,7 +334,10 @@ export function useIfcFederation() {
         });
 
         // Convert IFCX meshes to viewer format
-        const meshes: MeshData[] = convertIfcxMeshes(ifcxResult.meshes);
+          const meshes: MeshData[] = convertIfcxMeshes(ifcxResult.meshes).map((mesh) => ({
+            ...mesh,
+            modelIndex: renderModelIndex,
+          }));
 
         // Check if this is an overlay-only IFCX file (no geometry)
         if (meshes.length === 0 && ifcxResult.entityCount > 0) {
@@ -212,13 +349,18 @@ export function useIfcFederation() {
 
         const { bounds, stats } = calculateMeshBounds(meshes);
         const coordinateInfo = createCoordinateInfo(bounds);
+        const { chunks } = buildHugeGeometryChunks(meshes, 0);
+        assignModelIndexToHugeChunks(chunks, renderModelIndex);
 
         parsedGeometry = {
-          meshes,
+          meshes: [],
           totalVertices: stats.totalVertices,
           totalTriangles: stats.totalTriangles,
           coordinateInfo,
         };
+        parsedHugeChunks = chunks;
+        parsedHugeStats = buildHugeGeometryStatsFromChunks(chunks);
+        parsedHugeEntities = buildHugeGeometryEntityInfoMap(chunks);
 
         parsedDataStore = {
           fileSize: ifcxResult.fileSize,
@@ -241,7 +383,10 @@ export function useIfcFederation() {
         // GLB files: parse directly to MeshData (geometry only, no IFC data model)
         setProgress({ phase: 'Parsing GLB', percent: 10 });
 
-        const meshes = loadGLBToMeshData(new Uint8Array(buffer));
+        const meshes = loadGLBToMeshData(new Uint8Array(buffer)).map((mesh) => ({
+          ...mesh,
+          modelIndex: renderModelIndex,
+        }));
 
         if (meshes.length === 0) {
           setError('GLB file contains no geometry');
@@ -251,13 +396,18 @@ export function useIfcFederation() {
 
         const { bounds, stats } = calculateMeshBounds(meshes);
         const coordinateInfo = createCoordinateInfo(bounds);
+        const { chunks } = buildHugeGeometryChunks(meshes, 0);
+        assignModelIndexToHugeChunks(chunks, renderModelIndex);
 
         parsedGeometry = {
-          meshes,
+          meshes: [],
           totalVertices: stats.totalVertices,
           totalTriangles: stats.totalTriangles,
           coordinateInfo,
         };
+        parsedHugeChunks = chunks;
+        parsedHugeStats = buildHugeGeometryStatsFromChunks(chunks);
+        parsedHugeEntities = buildHugeGeometryEntityInfoMap(chunks);
 
         // Create a minimal data store for GLB (no IFC properties)
         parsedDataStore = {
@@ -292,7 +442,9 @@ export function useIfcFederation() {
 
         // Process geometry
         const allMeshes: MeshData[] = [];
+        const hugeChunks: HugeGeometryChunk[] = [];
         let finalCoordinateInfo: CoordinateInfo | null = null;
+        let finalHugeStats: HugeGeometryStats | null = null;
         // Capture RTC offset from WASM for proper multi-model alignment
         let capturedRtcOffset: { x: number; y: number; z: number } | null = null;
 
@@ -301,6 +453,7 @@ export function useIfcFederation() {
         for await (const event of geometryProcessor.processAdaptive(new Uint8Array(buffer), {
           sizeThreshold: 2 * 1024 * 1024,
           batchSize: dynamicBatchConfig,
+          preferHugeBatches: true,
         })) {
           switch (event.type) {
             case 'batch': {
@@ -317,8 +470,20 @@ export function useIfcFederation() {
               }
               break;
             }
+            case 'huge-batch': {
+              for (const chunk of event.chunks) hugeChunks.push(chunk);
+              finalCoordinateInfo = event.coordinateInfo ?? null;
+              finalHugeStats = event.stats;
+              const progressPercent = 10 + Math.min(80, (event.totalSoFar / 1000) * 0.8);
+              setProgress({ phase: `Processing geometry (${event.totalSoFar} meshes)`, percent: progressPercent });
+              break;
+            }
             case 'complete':
               finalCoordinateInfo = event.coordinateInfo ?? null;
+              break;
+            case 'huge-complete':
+              finalCoordinateInfo = event.coordinateInfo ?? null;
+              finalHugeStats = event.stats;
               break;
           }
         }
@@ -333,17 +498,27 @@ export function useIfcFederation() {
           }
         }
 
+        const fallbackCoordinateInfo = finalCoordinateInfo || createCoordinateInfo(calculateMeshBounds(allMeshes).bounds);
         parsedGeometry = {
-          meshes: allMeshes,
-          totalVertices: allMeshes.reduce((sum, m) => sum + m.positions.length / 3, 0),
-          totalTriangles: allMeshes.reduce((sum, m) => sum + m.indices.length / 3, 0),
-          coordinateInfo: finalCoordinateInfo || createCoordinateInfo(calculateMeshBounds(allMeshes).bounds),
+          meshes: hugeChunks.length > 0 ? [] : allMeshes,
+          totalVertices: hugeChunks.length > 0
+            ? (finalHugeStats?.totalVertices ?? 0)
+            : allMeshes.reduce((sum, m) => sum + m.positions.length / 3, 0),
+          totalTriangles: hugeChunks.length > 0
+            ? (finalHugeStats?.totalTriangles ?? 0)
+            : allMeshes.reduce((sum, m) => sum + m.indices.length / 3, 0),
+          coordinateInfo: fallbackCoordinateInfo,
         };
 
         // Store captured RTC offset in coordinate info for multi-model alignment
         if (parsedGeometry.coordinateInfo && capturedRtcOffset) {
           parsedGeometry.coordinateInfo.wasmRtcOffset = capturedRtcOffset;
         }
+
+        parsedHugeStats = finalHugeStats;
+        parsedHugeChunks = hugeChunks;
+        assignModelIndexToHugeChunks(parsedHugeChunks, renderModelIndex);
+        parsedHugeEntities = hugeChunks.length > 0 ? buildHugeGeometryEntityInfoMap(hugeChunks) : new Map();
 
         schemaVersion = parsedDataStore.schemaVersion === 'IFC4X3' ? 'IFC4X3' :
           parsedDataStore.schemaVersion === 'IFC4' ? 'IFC4' : 'IFC2X3';
@@ -381,6 +556,8 @@ export function useIfcFederation() {
         for (const mesh of parsedGeometry.meshes) {
           mesh.expressId = mesh.expressId + idOffset;
         }
+        applyGlobalIdOffsetToHugeChunks(parsedHugeChunks, idOffset);
+        parsedHugeEntities = buildHugeGeometryEntityInfoMap(parsedHugeChunks);
       }
 
       // =========================================================================
@@ -436,6 +613,8 @@ export function useIfcFederation() {
                 positions[i + 2] -= webglAdjustZ;
               }
             }
+            translateHugeChunks(parsedHugeChunks, webglAdjustX, webglAdjustY, webglAdjustZ);
+            parsedHugeEntities = buildHugeGeometryEntityInfoMap(parsedHugeChunks);
 
             // Update coordinate info bounds
             if (parsedGeometry.coordinateInfo) {
@@ -455,7 +634,9 @@ export function useIfcFederation() {
 
       // Build spatial index AFTER ID offset + RTC alignment so it stores
       // correct globalIds and final world-space positions.
-      buildSpatialIndexGuarded(parsedGeometry.meshes, parsedDataStore, setIfcDataStore);
+      if (parsedGeometry.meshes.length > 0) {
+        buildSpatialIndexGuarded(parsedGeometry.meshes, parsedDataStore, setIfcDataStore);
+      }
 
       // Create the federated model with offset info
       const federatedModel: FederatedModel = {
@@ -470,6 +651,10 @@ export function useIfcFederation() {
         fileSize: buffer.byteLength,
         idOffset,
         maxExpressId,
+        renderModelIndex,
+        hugeGeometryMode: parsedHugeChunks.length > 0,
+        hugeGeometryStats: parsedHugeStats,
+        hugeGeometryEntities: parsedHugeEntities,
       };
 
       // Add to store
@@ -478,6 +663,9 @@ export function useIfcFederation() {
       // Also set legacy single-model state for backward compatibility
       setIfcDataStore(parsedDataStore);
       setGeometryResult(parsedGeometry);
+      if (parsedHugeChunks.length > 0) {
+        appendHugeGeometryChunks(parsedHugeChunks, parsedHugeStats);
+      }
 
       setProgress({ phase: 'Complete', percent: 100 });
       setLoading(false);
@@ -493,7 +681,7 @@ export function useIfcFederation() {
       setLoading(false);
       return null;
     }
-  }, [setLoading, setError, setProgress, setIfcDataStore, setGeometryResult, storeAddModel, hasModels, registerModelOffset]);
+  }, [setLoading, setError, setProgress, setIfcDataStore, setGeometryResult, appendHugeGeometryChunks, storeAddModel, hasModels, registerModelOffset]);
 
   /**
    * Remove a model from the federation
@@ -508,11 +696,18 @@ export function useIfcFederation() {
       const newActive = remaining[0];
       setIfcDataStore(newActive.ifcDataStore);
       setGeometryResult(newActive.geometryResult);
+      const mergedHugeState = buildMergedHugeState(freshModels);
+      if (mergedHugeState.stats) {
+        setHugeGeometryState(true, mergedHugeState.stats, mergedHugeState.entities);
+      } else {
+        setHugeGeometryState(false, null, new Map());
+      }
     } else {
       setIfcDataStore(null);
       setGeometryResult(null);
+      setHugeGeometryState(false, null, new Map());
     }
-  }, [storeRemoveModel, setIfcDataStore, setGeometryResult]);
+  }, [storeRemoveModel, setIfcDataStore, setGeometryResult, setHugeGeometryState]);
 
   /**
    * Get query instance for a specific model
@@ -638,6 +833,7 @@ export function useIfcFederation() {
       // Clear existing models and add each layer as a "model" in the Models panel
       // This shows users all the files that contributed to the composition
       clearAllModels();
+      let nextRenderModelIndex = 0;
 
       // Find max expressId for proper ID range tracking
       // This is needed for resolveGlobalIdFromModels to work correctly
@@ -676,6 +872,7 @@ export function useIfcFederation() {
           // Overlays share the same data store so they don't need their own range
           idOffset: 0,
           maxExpressId: isBaseLayer ? maxExpressId : 0,
+          renderModelIndex: nextRenderModelIndex++,
           // Mark overlay-only layers
           _isOverlay: !isBaseLayer,
           _layerIndex: i,

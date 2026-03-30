@@ -226,6 +226,8 @@ export interface FederatedModel {
   idOffset: number;
   /** Maximum original expressId in this model (for range validation) */
   maxExpressId: number;
+  /** Stable renderer-facing model index used for picking and visibility. */
+  renderModelIndex?: number;
 }
 
 /** Convert EntityRef to string for use as Map/Set key */

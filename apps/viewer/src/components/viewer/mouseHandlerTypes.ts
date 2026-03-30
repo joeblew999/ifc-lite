@@ -100,7 +100,7 @@ export interface MouseHandlerContext {
   toggleSelection: (entityId: number) => void;
   openContextMenu: (entityId: number | null, screenX: number, screenY: number) => void;
   hasPendingMeasurements: () => boolean;
-  getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null };
+  getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null; visibleModelIndices: Set<number> | null };
 
   // Constants
   HOVER_SNAP_THROTTLE_MS: number;

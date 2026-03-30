@@ -31,6 +31,7 @@ export interface UseAnimationLoopParams {
   activeToolRef: MutableRefObject<string>;
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
   isolatedEntitiesRef: MutableRefObject<Set<number> | null>;
+  visibleModelIndicesRef: MutableRefObject<Set<number> | null>;
   selectedEntityIdRef: MutableRefObject<number | null>;
   selectedModelIndexRef: MutableRefObject<number | undefined>;
   clearColorRef: MutableRefObject<[number, number, number, number]>;
@@ -64,6 +65,7 @@ export function useAnimationLoop(params: UseAnimationLoopParams): void {
     activeToolRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
+    visibleModelIndicesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     clearColorRef,
@@ -159,6 +161,7 @@ export function useAnimationLoop(params: UseAnimationLoopParams): void {
         renderer.render({
           hiddenIds: hiddenEntitiesRef.current,
           isolatedIds: isolatedEntitiesRef.current,
+          visibleModelIndices: visibleModelIndicesRef.current,
           selectedId: selectedEntityIdRef.current,
           selectedIds: selectedEntityIdsRef.current,
           selectedModelIndex: selectedModelIndexRef.current,

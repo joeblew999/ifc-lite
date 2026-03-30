@@ -738,6 +738,7 @@ export class Renderer {
         // Check if visibility filtering is active
         const hasHiddenFilter = options.hiddenIds && options.hiddenIds.size > 0;
         const hasIsolatedFilter = options.isolatedIds !== null && options.isolatedIds !== undefined;
+        const hasVisibleModelFilter = options.visibleModelIndices !== null && options.visibleModelIndices !== undefined;
         const hasVisibilityFiltering = hasHiddenFilter || hasIsolatedFilter;
 
         // PERFORMANCE FIX: Use batch-level visibility filtering instead of creating individual meshes
@@ -767,6 +768,9 @@ export class Renderer {
         }
         if (options.isolatedIds !== null && options.isolatedIds !== undefined) {
             meshes = meshes.filter(mesh => options.isolatedIds!.has(mesh.expressId));
+        }
+        if (options.visibleModelIndices !== null && options.visibleModelIndices !== undefined) {
+            meshes = meshes.filter(mesh => mesh.modelIndex === undefined || options.visibleModelIndices!.has(mesh.modelIndex));
         }
 
         // Resize depth texture if needed
@@ -1044,6 +1048,10 @@ export class Renderer {
                         if (!FrustumUtils.isAABBVisible(frustum, batchAABB)) {
                             continue; // Entire batch is off-screen
                         }
+                    }
+
+                    if (hasVisibleModelFilter && batch.modelIndex !== undefined && !options.visibleModelIndices!.has(batch.modelIndex)) {
+                        continue;
                     }
 
                     // Check visibility

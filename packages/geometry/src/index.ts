@@ -38,6 +38,7 @@ export {
 } from './geometry-deduplicator.js';
 export * from './types.js';
 export * from './default-materials.js';
+export { buildHugeGeometryChunks } from './huge-chunk-builder.js';
 
 // Zero-copy GPU upload (new - faster, less memory)
 export { WasmMemoryManager, type GpuGeometryHandle, type GpuMeshMetadataHandle, type GpuInstancedGeometryHandle, type GpuInstancedGeometryCollectionHandle, type GpuInstancedGeometryRefHandle } from './wasm-memory-manager.js';

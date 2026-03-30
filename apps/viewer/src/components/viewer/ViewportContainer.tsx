@@ -48,12 +48,54 @@ export function ViewportContainer() {
   // Multi-model: create mapping from modelId to modelIndex (stable order)
   const modelIdToIndex = useMemo(() => {
     const map = new Map<string, number>();
-    let index = 0;
+    const usedIndices = new Set<number>();
+    let fallbackIndex = 0;
+    for (const [modelId, model] of storeModels) {
+      if (model.renderModelIndex !== undefined) {
+        map.set(modelId, model.renderModelIndex);
+        usedIndices.add(model.renderModelIndex);
+        continue;
+      }
+      while (usedIndices.has(fallbackIndex)) fallbackIndex += 1;
+      map.set(modelId, fallbackIndex);
+      usedIndices.add(fallbackIndex);
+      fallbackIndex += 1;
+    }
     for (const modelId of storeModels.keys()) {
-      map.set(modelId, index++);
+      if (!map.has(modelId)) {
+        while (usedIndices.has(fallbackIndex)) fallbackIndex += 1;
+        map.set(modelId, fallbackIndex);
+        usedIndices.add(fallbackIndex);
+        fallbackIndex += 1;
+      }
     }
     return map;
   }, [storeModels]);
+
+  const visibleModelIndices = useMemo(() => {
+    if (storeModels.size === 0) return null;
+    const indices = new Set<number>();
+    for (const [modelId, model] of storeModels) {
+      if (!model.visible) continue;
+      const renderModelIndex = modelIdToIndex.get(modelId);
+      if (renderModelIndex !== undefined) {
+        indices.add(renderModelIndex);
+      }
+    }
+    return indices;
+  }, [modelIdToIndex, storeModels]);
+
+  const allModelIndices = useMemo(() => {
+    if (storeModels.size === 0) return null;
+    const indices = new Set<number>();
+    for (const modelId of storeModels.keys()) {
+      const renderModelIndex = modelIdToIndex.get(modelId);
+      if (renderModelIndex !== undefined) {
+        indices.add(renderModelIndex);
+      }
+    }
+    return indices;
+  }, [modelIdToIndex, storeModels]);
 
   // Multi-model: merge geometries from all visible models
   const mergedGeometryResult = useMemo(() => {
@@ -616,6 +658,8 @@ export function ViewportContainer() {
         coordinateInfo={mergedGeometryResult?.coordinateInfo}
         computedIsolatedIds={computedIsolatedIds}
         modelIdToIndex={modelIdToIndex}
+        visibleModelIndices={visibleModelIndices}
+        allModelIndices={allModelIndices}
       />
       {bcfOverlayVisible && <BCFOverlay />}
       <ViewportOverlays />

@@ -31,6 +31,7 @@ export interface UseTouchControlsParams {
   activeToolRef: MutableRefObject<string>;
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
   isolatedEntitiesRef: MutableRefObject<Set<number> | null>;
+  visibleModelIndicesRef: MutableRefObject<Set<number> | null>;
   selectedEntityIdRef: MutableRefObject<number | null>;
   selectedModelIndexRef: MutableRefObject<number | undefined>;
   clearColorRef: MutableRefObject<[number, number, number, number]>;
@@ -39,7 +40,7 @@ export interface UseTouchControlsParams {
   geometryRef: MutableRefObject<MeshData[] | null>;
   isInteractingRef: MutableRefObject<boolean>;
   handlePickForSelection: (pickResult: PickResult | null) => void;
-  getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null };
+  getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null; visibleModelIndices: Set<number> | null };
 }
 
 export function useTouchControls(params: UseTouchControlsParams): void {
@@ -51,6 +52,7 @@ export function useTouchControls(params: UseTouchControlsParams): void {
     activeToolRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
+    visibleModelIndicesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     clearColorRef,
@@ -100,6 +102,7 @@ export function useTouchControls(params: UseTouchControlsParams): void {
         const hit = renderer.raycastScene(tx, ty, {
           hiddenIds: hiddenEntitiesRef.current,
           isolatedIds: isolatedEntitiesRef.current,
+          visibleModelIndices: visibleModelIndicesRef.current,
         });
         if (hit?.intersection) {
           camera.setOrbitCenter(hit.intersection.point);

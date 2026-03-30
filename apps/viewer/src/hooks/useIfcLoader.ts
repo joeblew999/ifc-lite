@@ -14,7 +14,7 @@ import { useCallback, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore } from '../store.js';
 import { IfcParser, detectFormat, parseIfcx, type IfcDataStore } from '@ifc-lite/parser';
-import { GeometryProcessor, GeometryQuality, type CoordinateInfo, type HugeGeometryChunk, type HugeGeometryStats, type MeshData } from '@ifc-lite/geometry';
+import { buildHugeGeometryChunks, GeometryProcessor, GeometryQuality, type CoordinateInfo, type HugeGeometryChunk, type HugeGeometryStats, type MeshData } from '@ifc-lite/geometry';
 import { buildSpatialIndexGuarded } from '../utils/loadingUtils.js';
 import { type GeometryData, loadGLBToMeshData } from '@ifc-lite/cache';
 
@@ -109,6 +109,23 @@ function reconstructMeshesFromHugeChunks(chunks: HugeGeometryChunk[]): MeshData[
   }
 
   return meshes;
+}
+
+function buildHugeGeometryStatsFromChunks(chunks: HugeGeometryChunk[]): HugeGeometryStats {
+  let totalVertices = 0;
+  let totalTriangles = 0;
+  let totalElements = 0;
+  for (const chunk of chunks) {
+    totalVertices += chunk.vertexData.length / chunk.vertexStrideFloats;
+    totalTriangles += chunk.indexCount / 3;
+    totalElements += chunk.elements.length;
+  }
+  return {
+    totalBatches: chunks.length,
+    totalElements,
+    totalVertices,
+    totalTriangles,
+  };
 }
 
 /**
@@ -227,13 +244,16 @@ export function useIfcLoader() {
           // Calculate bounds and statistics
           const { bounds, stats } = calculateMeshBounds(meshes);
           const coordinateInfo = createCoordinateInfo(bounds);
+          const { chunks } = buildHugeGeometryChunks(meshes, 0);
+          const hugeStats = buildHugeGeometryStatsFromChunks(chunks);
 
           setGeometryResult({
-            meshes,
+            meshes: [],
             totalVertices: stats.totalVertices,
             totalTriangles: stats.totalTriangles,
             coordinateInfo,
           });
+          appendHugeGeometryChunks(chunks, hugeStats);
 
           // Convert IFCX data model to IfcDataStore format
           // IFCX already provides entities, properties, quantities, relationships, spatialHierarchy
@@ -285,13 +305,16 @@ export function useIfcLoader() {
 
           const { bounds, stats } = calculateMeshBounds(meshes);
           const coordinateInfo = createCoordinateInfo(bounds);
+          const { chunks } = buildHugeGeometryChunks(meshes, 0);
+          const hugeStats = buildHugeGeometryStatsFromChunks(chunks);
 
           setGeometryResult({
-            meshes,
+            meshes: [],
             totalVertices: stats.totalVertices,
             totalTriangles: stats.totalTriangles,
             coordinateInfo,
           });
+          appendHugeGeometryChunks(chunks, hugeStats);
 
           // GLB files have no IFC data model - set a minimal store
           setIfcDataStore(null);

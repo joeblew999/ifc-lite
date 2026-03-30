@@ -502,6 +502,7 @@ export class Scene {
       indexCount: chunk.indexCount,
       color: chunk.color,
       expressIds,
+      modelIndex: chunk.modelIndex,
       bindGroup,
       uniformBuffer,
       bounds: {
@@ -566,6 +567,89 @@ export class Scene {
 
   getHugeEntityRows(expressId: number): HugeGeometryElementRow[] | undefined {
     return this.hugeEntityRows.get(expressId);
+  }
+
+  getHugeModelIndices(): Set<number> {
+    const indices = new Set<number>();
+    for (const chunk of this.hugeChunkData.values()) {
+      if (chunk.modelIndex !== undefined) {
+        indices.add(chunk.modelIndex);
+      }
+    }
+    return indices;
+  }
+
+  removeHugeGeometryForModelIndex(modelIndex: number): void {
+    const batchIdsToRemove: number[] = [];
+    for (const [batchId, chunk] of this.hugeChunkData.entries()) {
+      if (chunk.modelIndex === modelIndex) {
+        batchIdsToRemove.push(batchId);
+      }
+    }
+    if (batchIdsToRemove.length === 0) return;
+
+    const batchesToRemove = new Set(batchIdsToRemove);
+    this.batchedMeshes = this.batchedMeshes.filter((batch) => {
+      if (!batch.colorKey.startsWith('huge:')) return true;
+      const batchId = Number(batch.colorKey.slice(5));
+      return !Number.isFinite(batchId) || !batchesToRemove.has(batchId);
+    });
+
+    for (const batchId of batchIdsToRemove) {
+      const batch = this.hugeBatchMap.get(batchId);
+      if (batch) {
+        batch.vertexBuffer.destroy();
+        batch.indexBuffer.destroy();
+        if (batch.uniformBuffer) batch.uniformBuffer.destroy();
+        this.hugeBatchMap.delete(batchId);
+      }
+      this.hugeChunkData.delete(batchId);
+    }
+
+    for (const [expressId, rows] of this.hugeEntityRows.entries()) {
+      const remainingRows = rows.filter((row) => row.modelIndex !== modelIndex);
+      if (remainingRows.length > 0) {
+        this.hugeEntityRows.set(expressId, remainingRows);
+        this.hugeEntityBatchIds.set(expressId, Array.from(new Set(remainingRows.map((row) => row.batchId))));
+        const firstRow = remainingRows[0];
+        this.hugeEntityInfo.set(expressId, {
+          expressId,
+          ifcType: firstRow.ifcType,
+          modelIndex: firstRow.modelIndex,
+          color: firstRow.color,
+          boundsMin: [...firstRow.boundsMin] as [number, number, number],
+          boundsMax: [...firstRow.boundsMax] as [number, number, number],
+        });
+        this.boundingBoxes.set(expressId, {
+          min: { x: firstRow.boundsMin[0], y: firstRow.boundsMin[1], z: firstRow.boundsMin[2] },
+          max: { x: firstRow.boundsMax[0], y: firstRow.boundsMax[1], z: firstRow.boundsMax[2] },
+        });
+      } else {
+        this.hugeEntityRows.delete(expressId);
+        this.hugeEntityInfo.delete(expressId);
+        this.hugeEntityBatchIds.delete(expressId);
+        this.boundingBoxes.delete(expressId);
+      }
+    }
+
+    let totalVertices = 0;
+    let totalTriangles = 0;
+    for (const chunk of this.hugeChunkData.values()) {
+      totalVertices += chunk.vertexData.length / chunk.vertexStrideFloats;
+      totalTriangles += chunk.indexCount / 3;
+    }
+    this.hugeGeometryStats = this.hugeChunkData.size === 0
+      ? null
+      : {
+          totalBatches: this.hugeBatchMap.size,
+          totalElements: this.hugeEntityInfo.size,
+          totalVertices,
+          totalTriangles,
+        };
+
+    if (this.hugeBatchMap.size === 0) {
+      this.hugeGeometryMode = false;
+    }
   }
 
   updateHugeMeshColors(
@@ -1841,7 +1925,8 @@ export class Scene {
     rayOrigin: Vec3,
     rayDir: Vec3,
     hiddenIds?: Set<number>,
-    isolatedIds?: Set<number> | null
+    isolatedIds?: Set<number> | null,
+    visibleModelIndices?: Set<number> | null,
   ): { expressId: number; distance: number; modelIndex?: number } | null {
     // Precompute ray direction inverse and signs for box tests
     const rayDirInv: Vec3 = {
@@ -1865,6 +1950,10 @@ export class Scene {
       for (const [expressId, bbox] of this.boundingBoxes) {
         if (hiddenIds?.has(expressId)) continue;
         if (isolatedIds !== null && isolatedIds !== undefined && !isolatedIds.has(expressId)) continue;
+        if (visibleModelIndices !== null && visibleModelIndices !== undefined) {
+          const info = this.hugeEntityInfo.get(expressId);
+          if (info?.modelIndex !== undefined && !visibleModelIndices.has(info.modelIndex)) continue;
+        }
 
         const tNear = this.rayBoxDistance(rayOrigin, rayDirInv, rayDirSign, bbox);
         if (tNear !== null && tNear < closestDistance) {
@@ -1896,6 +1985,10 @@ export class Scene {
     for (const expressId of candidates) {
       const pieces = this.meshDataMap.get(expressId);
       if (!pieces) continue;
+      if (visibleModelIndices !== null && visibleModelIndices !== undefined) {
+        const pieceModelIndex = pieces[0]?.modelIndex;
+        if (pieceModelIndex !== undefined && !visibleModelIndices.has(pieceModelIndex)) continue;
+      }
 
       for (const piece of pieces) {
         const positions = piece.positions;

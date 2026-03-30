@@ -65,6 +65,14 @@ export class RaycastEngine {
                 ) {
                     continue;
                 }
+                if (
+                    options?.visibleModelIndices !== null &&
+                    options?.visibleModelIndices !== undefined &&
+                    piece.modelIndex !== undefined &&
+                    !options.visibleModelIndices.has(piece.modelIndex)
+                ) {
+                    continue;
+                }
 
                 // Avoid duplicates when a piece is reachable from both regular and batched passes
                 const key = `${piece.expressId}:${piece.modelIndex ?? 'any'}:${piece.positions.length}:${piece.indices.length}`;
@@ -81,6 +89,14 @@ export class RaycastEngine {
 
         // Collect mesh data from batched meshes
         for (const batch of batchedMeshes) {
+            if (
+                options?.visibleModelIndices !== null &&
+                options?.visibleModelIndices !== undefined &&
+                batch.modelIndex !== undefined &&
+                !options.visibleModelIndices.has(batch.modelIndex)
+            ) {
+                continue;
+            }
             for (const expressId of batch.expressIds) {
                 pushVisiblePieces(expressId);
             }

@@ -84,6 +84,7 @@ export interface BatchedMesh {
   indexCount: number;
   color: [number, number, number, number];
   expressIds: number[];  // For picking - all expressIds in this batch
+  modelIndex?: number;
   bindGroup?: GPUBindGroup;
   uniformBuffer?: GPUBuffer;
   // Bounding box for frustum culling (optional)
@@ -132,6 +133,7 @@ export interface RenderOptions {
   // Visibility filtering
   hiddenIds?: Set<number>;        // Meshes to hide
   isolatedIds?: Set<number> | null; // Only show these meshes (null = show all)
+  visibleModelIndices?: Set<number> | null; // Restrict rendering to these model indices
   selectedId?: number | null;     // Currently selected mesh (for highlighting)
   selectedIds?: Set<number>;      // Multi-selection support
   // Building rotation in radians (from IfcSite placement) - used to orient section planes
@@ -159,6 +161,7 @@ export interface PickOptions {
   // Visibility filtering - same as RenderOptions for consistency
   hiddenIds?: Set<number>;        // Hidden elements (can't be picked)
   isolatedIds?: Set<number> | null; // Only these elements can be picked (null = all pickable)
+  visibleModelIndices?: Set<number> | null; // Restrict picking to these model indices
 }
 
 /**

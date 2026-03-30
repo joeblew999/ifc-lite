@@ -60,6 +60,7 @@ export interface UseMouseControlsParams {
   // Visibility/selection refs
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
   isolatedEntitiesRef: MutableRefObject<Set<number> | null>;
+  visibleModelIndicesRef: MutableRefObject<Set<number> | null>;
   selectedEntityIdRef: MutableRefObject<number | null>;
   selectedModelIndexRef: MutableRefObject<number | undefined>;
   clearColorRef: MutableRefObject<[number, number, number, number]>;
@@ -119,7 +120,7 @@ export interface UseMouseControlsParams {
   updateCameraRotationRealtime: (rotation: { azimuth: number; elevation: number }) => void;
   toggleSelection: (entityId: number) => void;
   calculateScale: () => void;
-  getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null };
+  getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null; visibleModelIndices: Set<number> | null };
   hasPendingMeasurements: () => boolean;
 
   // Constants
@@ -144,6 +145,7 @@ export function useMouseControls(params: UseMouseControlsParams): void {
     measurementConstraintEdgeRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
+    visibleModelIndicesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     clearColorRef,
@@ -290,6 +292,7 @@ export function useMouseControls(params: UseMouseControlsParams): void {
           hit = renderer.raycastScene(cx, cy, {
             hiddenIds: hiddenEntitiesRef.current,
             isolatedIds: isolatedEntitiesRef.current,
+            visibleModelIndices: visibleModelIndicesRef.current,
           });
         }
 

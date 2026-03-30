@@ -47,9 +47,11 @@ interface ViewportProps {
   coordinateInfo?: CoordinateInfo;
   computedIsolatedIds?: Set<number> | null;
   modelIdToIndex?: Map<string, number>;
+  visibleModelIndices?: Set<number> | null;
+  allModelIndices?: Set<number> | null;
 }
 
-export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIsolatedIds, modelIdToIndex }: ViewportProps) {
+export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIsolatedIds, modelIdToIndex, visibleModelIndices = null, allModelIndices = null }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<Renderer | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -98,6 +100,24 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
   const selectedModelIndex = selectedEntity && modelIdToIndex
     ? modelIdToIndex.get(selectedEntity.modelId) ?? undefined
     : undefined;
+  const visibleModelIndicesRef = useLatestRef(visibleModelIndices);
+
+  useEffect(() => {
+    const renderer = rendererRef.current;
+    if (!renderer || !allModelIndices) return;
+
+    const scene = renderer.getScene();
+    const existingHugeModelIndices = scene.getHugeModelIndices();
+    let removedAny = false;
+    for (const modelIndex of existingHugeModelIndices) {
+      if (allModelIndices.has(modelIndex)) continue;
+      scene.removeHugeGeometryForModelIndex(modelIndex);
+      removedAny = true;
+    }
+    if (removedAny) {
+      renderer.requestRender();
+    }
+  }, [allModelIndices]);
 
   // Helper to handle pick result and set selection properly
   // IMPORTANT: pickResult.expressId is now a globalId (transformed at load time)
@@ -470,6 +490,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
       isStreaming: currentIsStreaming,
       hiddenIds: hiddenEntitiesRef.current,
       isolatedIds: isolatedEntitiesRef.current,
+      visibleModelIndices: visibleModelIndicesRef.current,
     };
   };
 
@@ -690,6 +711,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     measurementConstraintEdgeRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
+    visibleModelIndicesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     clearColorRef,
@@ -745,6 +767,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     activeToolRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
+    visibleModelIndicesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     clearColorRef,
@@ -786,6 +809,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     activeToolRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
+    visibleModelIndicesRef,
     selectedEntityIdRef,
     selectedModelIndexRef,
     clearColorRef,
@@ -829,6 +853,7 @@ export function Viewport({ geometry, geometryVersion, coordinateInfo, computedIs
     visualEnhancementRef,
     hiddenEntities,
     isolatedEntities,
+    visibleModelIndices,
     selectedEntityId,
     selectedEntityIds,
     selectedModelIndex,

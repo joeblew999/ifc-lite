@@ -29,6 +29,7 @@ export interface UseRenderUpdatesParams {
   // Visibility/selection state (reactive values, not refs)
   hiddenEntities: Set<number>;
   isolatedEntities: Set<number> | null;
+  visibleModelIndices: Set<number> | null;
   selectedEntityId: number | null;
   selectedEntityIds: Set<number> | undefined;
   selectedModelIndex: number | undefined;
@@ -61,6 +62,7 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
     clearColorRef,
     hiddenEntities,
     isolatedEntities,
+    visibleModelIndices,
     selectedEntityId,
     selectedEntityIds,
     selectedModelIndex,
@@ -121,7 +123,7 @@ export function useRenderUpdates(params: UseRenderUpdatesParams): void {
     if (!renderer || !isInitialized) return;
 
     renderer.requestRender();
-  }, [hiddenEntities, isolatedEntities, selectedEntityId, selectedEntityIds, selectedModelIndex, isInitialized, sectionPlane, activeTool, sectionRange, coordinateInfo?.buildingRotation]);
+  }, [hiddenEntities, isolatedEntities, visibleModelIndices, selectedEntityId, selectedEntityIds, selectedModelIndex, isInitialized, sectionPlane, activeTool, sectionRange, coordinateInfo?.buildingRotation]);
 }
 
 export default useRenderUpdates;
