@@ -449,11 +449,15 @@ export function useIfcFederation() {
         let capturedRtcOffset: { x: number; y: number; z: number } | null = null;
 
         const dynamicBatchConfig = getDynamicBatchConfig(fileSizeMB);
+        const hugeTargetChunkBytes = buffer.byteLength >= 512 * 1024 * 1024
+          ? 64 * 1024 * 1024
+          : undefined;
 
         for await (const event of geometryProcessor.processAdaptive(new Uint8Array(buffer), {
           sizeThreshold: 2 * 1024 * 1024,
           batchSize: dynamicBatchConfig,
           preferHugeBatches: true,
+          targetChunkBytes: hugeTargetChunkBytes,
         })) {
           switch (event.type) {
             case 'batch': {
@@ -778,12 +782,23 @@ export function useIfcFederation() {
       // Convert IFCX meshes to viewer format
       const meshes: MeshData[] = convertIfcxMeshes(result.meshes);
 
+      // Get layer info with mesh counts
+      const layers = result.layerStack.getLayers();
+
       // Calculate bounds
       const { bounds, stats } = calculateMeshBounds(meshes);
       const coordinateInfo = createCoordinateInfo(bounds);
+      const baseRenderModelIndex = Math.max(0, layers.length - 1);
+      const { chunks } = buildHugeGeometryChunks(
+        meshes.map((mesh) => ({ ...mesh, modelIndex: baseRenderModelIndex })),
+        0,
+      );
+      assignModelIndexToHugeChunks(chunks, baseRenderModelIndex);
+      const hugeStats = buildHugeGeometryStatsFromChunks(chunks);
+      const hugeEntities = buildHugeGeometryEntityInfoMap(chunks);
 
       const geometryResult = {
-        meshes,
+        meshes: [],
         totalVertices: stats.totalVertices,
         totalTriangles: stats.totalTriangles,
         coordinateInfo,
@@ -793,9 +808,6 @@ export function useIfcFederation() {
       // For federated loading, geometry comes from the models Map via mergedGeometryResult.
       // Calling setGeometryResult() before models are added causes a race condition where
       // meshes are added to the scene WITHOUT modelIndex, breaking selection highlighting.
-
-      // Get layer info with mesh counts
-      const layers = result.layerStack.getLayers();
 
       // Create data store from federated result
       const dataStore = {
@@ -873,6 +885,9 @@ export function useIfcFederation() {
           idOffset: 0,
           maxExpressId: isBaseLayer ? maxExpressId : 0,
           renderModelIndex: nextRenderModelIndex++,
+          hugeGeometryMode: isBaseLayer,
+          hugeGeometryStats: isBaseLayer ? hugeStats : null,
+          hugeGeometryEntities: isBaseLayer ? hugeEntities : new Map(),
           // Mark overlay-only layers
           _isOverlay: !isBaseLayer,
           _layerIndex: i,
@@ -880,6 +895,8 @@ export function useIfcFederation() {
 
         storeAddModel(layerModel);
       }
+
+      appendHugeGeometryChunks(chunks, hugeStats);
 
       console.log(`[useIfc] Federated IFCX loaded: ${layers.length} layers, ${result.entityCount} entities, ${meshes.length} meshes`);
       console.log(`[useIfc] Composition stats: ${result.compositionStats.inheritanceResolutions} inheritance resolutions, ${result.compositionStats.crossLayerReferences} cross-layer refs`);
@@ -893,7 +910,7 @@ export function useIfcFederation() {
       setError(`Federated IFCX loading failed: ${message}`);
       setLoading(false);
     }
-  }, [setLoading, setError, setProgress, setGeometryResult, setIfcDataStore, storeAddModel, clearAllModels]);
+  }, [setLoading, setError, setProgress, setGeometryResult, setIfcDataStore, appendHugeGeometryChunks, storeAddModel, clearAllModels]);
 
   const loadFederatedIfcx = useCallback(async (files: File[]): Promise<void> => {
     if (files.length === 0) {

@@ -456,6 +456,9 @@ export function useIfcLoader() {
       let pendingMeshes: MeshData[] = [];
       let lastRenderTime = 0;
       const RENDER_INTERVAL_MS = getRenderIntervalMs(fileSizeMB);
+      const hugeTargetChunkBytes = preferHugeBatches && buffer.byteLength >= 512 * 1024 * 1024
+        ? 64 * 1024 * 1024
+        : undefined;
 
       try {
         // Use dynamic batch sizing for optimal throughput
@@ -477,6 +480,7 @@ export function useIfcLoader() {
           sizeThreshold: 2 * 1024 * 1024, // 2MB threshold
           batchSize: dynamicBatchConfig, // Dynamic batches: small first, then large
           preferHugeBatches,
+          targetChunkBytes: hugeTargetChunkBytes,
         })) {
           const eventReceived = performance.now();
 

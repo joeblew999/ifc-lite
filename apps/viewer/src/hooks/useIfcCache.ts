@@ -18,7 +18,7 @@ import {
 } from '@ifc-lite/cache';
 import { SpatialHierarchyBuilder, StepTokenizer, buildCompactEntityIndex, extractLengthUnitScale, type IfcDataStore } from '@ifc-lite/parser';
 import { buildSpatialIndexGuarded } from '../utils/loadingUtils.js';
-import type { MeshData } from '@ifc-lite/geometry';
+import { buildHugeGeometryChunks, type HugeGeometryChunk, type HugeGeometryStats, type MeshData } from '@ifc-lite/geometry';
 
 import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore } from '../store.js';
@@ -67,11 +67,30 @@ export function useIfcCache() {
     setProgress,
     setIfcDataStore,
     setGeometryResult,
+    appendHugeGeometryChunks,
   } = useViewerStore(useShallow((s) => ({
     setProgress: s.setProgress,
     setIfcDataStore: s.setIfcDataStore,
     setGeometryResult: s.setGeometryResult,
+    appendHugeGeometryChunks: s.appendHugeGeometryChunks,
   })));
+
+  const buildHugeGeometryStatsFromChunks = (chunks: HugeGeometryChunk[]): HugeGeometryStats => {
+    let totalVertices = 0;
+    let totalTriangles = 0;
+    let totalElements = 0;
+    for (const chunk of chunks) {
+      totalVertices += chunk.vertexData.length / chunk.vertexStrideFloats;
+      totalTriangles += chunk.indexCount / 3;
+      totalElements += chunk.elements.length;
+    }
+    return {
+      totalBatches: chunks.length,
+      totalElements,
+      totalVertices,
+      totalTriangles,
+    };
+  };
 
   /**
    * Load from binary cache - INSTANT load for maximum speed
@@ -179,14 +198,16 @@ export function useIfcCache() {
 
       if (result.geometry) {
         const { meshes, coordinateInfo, totalVertices, totalTriangles } = result.geometry;
+        const { chunks } = buildHugeGeometryChunks(meshes, 0);
+        const hugeStats = buildHugeGeometryStatsFromChunks(chunks);
 
-        // INSTANT: Set ALL geometry in ONE call - fastest for cached models
         setGeometryResult({
-          meshes,
+          meshes: [],
           totalVertices,
           totalTriangles,
           coordinateInfo,
         });
+        appendHugeGeometryChunks(chunks, hugeStats);
 
         // Set data store
         setIfcDataStore(dataStore);
@@ -215,7 +236,7 @@ export function useIfcCache() {
       }
       return false;
     }
-  }, [setProgress, setIfcDataStore, setGeometryResult]);
+  }, [setProgress, setIfcDataStore, setGeometryResult, appendHugeGeometryChunks]);
 
   /**
    * Save parsed data and geometry to cache
