@@ -520,9 +520,7 @@ export function useIfcLoader() {
         };
         estimatedTotal = buffer.byteLength / 1000;
         if (useZeroCopyGeometry && renderer && zeroCopyApi) {
-          const decoder = new TextDecoder();
-          const content = decoder.decode(new Uint8Array(buffer));
-          const collector = new ZeroCopyMeshCollector(zeroCopyApi, content);
+          const collector = new ZeroCopyMeshCollector(zeroCopyApi, new Uint8Array(buffer));
           const entityInfoMap = new Map<number, import('@ifc-lite/geometry').HugeGeometryEntityInfo>();
           let zeroCopyBounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } } | null = null;
           let zeroCopyStats: HugeGeometryStats = {

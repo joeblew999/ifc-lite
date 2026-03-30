@@ -82,7 +82,7 @@ export interface ZeroCopyBatch {
  *
  * Usage:
  * ```typescript
- * const collector = new ZeroCopyMeshCollector(ifcApi, content);
+ * const collector = new ZeroCopyMeshCollector(ifcApi, bytes);
  *
  * for await (const batch of collector.streamBatches()) {
  *   // Create GPU buffers
@@ -101,10 +101,10 @@ export interface ZeroCopyBatch {
  */
 export class ZeroCopyMeshCollector {
   private ifcApi: IfcAPI;
-  private content: string;
+  private content: Uint8Array;
   private memoryManager: WasmMemoryManager;
 
-  constructor(ifcApi: IfcAPI, content: string) {
+  constructor(ifcApi: IfcAPI, content: Uint8Array) {
     this.ifcApi = ifcApi;
     this.content = content;
 
@@ -134,8 +134,8 @@ export class ZeroCopyMeshCollector {
 
     // Start async processing
     const processingPromise = (this.ifcApi as unknown as {
-      parseToGpuGeometryAsync: (content: string, options: ParseOptions) => Promise<void>;
-    }).parseToGpuGeometryAsync(this.content, {
+      parseToGpuGeometryAsyncBytes: (content: Uint8Array, options: ParseOptions) => Promise<void>;
+    }).parseToGpuGeometryAsyncBytes(this.content, {
       batchSize,
       onBatch: (gpuGeom: GpuGeometryHandle, _progress: ZeroCopyStreamingProgress) => {
         batchQueue.push(gpuGeom);
@@ -222,8 +222,8 @@ export class ZeroCopyMeshCollector {
   parseAll(): ZeroCopyBatch {
     // Get GPU-ready geometry from WASM
     const gpuGeom = (this.ifcApi as unknown as {
-      parseToGpuGeometry: (content: string) => GpuGeometryHandle;
-    }).parseToGpuGeometry(this.content);
+      parseToGpuGeometryBytes: (content: Uint8Array) => GpuGeometryHandle;
+    }).parseToGpuGeometryBytes(this.content);
 
     // Create zero-copy views
     const vertexView = this.memoryManager.createFloat32View(

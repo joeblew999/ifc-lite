@@ -1741,6 +1741,15 @@ impl IfcAPI {
         gpu_geometry
     }
 
+    /// Raw-bytes variant of parseToGpuGeometry.
+    ///
+    /// This avoids constructing a giant JavaScript string before entering WASM.
+    #[wasm_bindgen(js_name = parseToGpuGeometryBytes)]
+    pub fn parse_to_gpu_geometry_bytes(&self, data: &[u8]) -> GpuGeometry {
+        let content = unsafe { String::from_utf8_unchecked(data.to_vec()) };
+        self.parse_to_gpu_geometry(content)
+    }
+
     /// Parse IFC file with streaming GPU-ready geometry batches
     ///
     /// Yields batches of GPU-ready geometry for progressive rendering with zero-copy upload.
@@ -2159,6 +2168,15 @@ impl IfcAPI {
         });
 
         promise
+    }
+
+    /// Raw-bytes variant of parseToGpuGeometryAsync.
+    ///
+    /// This avoids constructing a giant JavaScript string before entering WASM.
+    #[wasm_bindgen(js_name = parseToGpuGeometryAsyncBytes)]
+    pub fn parse_to_gpu_geometry_async_bytes(&self, data: &[u8], options: JsValue) -> js_sys::Promise {
+        let content = unsafe { String::from_utf8_unchecked(data.to_vec()) };
+        self.parse_to_gpu_geometry_async(content, options)
     }
 
     /// Parse IFC file to GPU-ready instanced geometry for zero-copy upload

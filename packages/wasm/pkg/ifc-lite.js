@@ -212,12 +212,12 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function __wasm_bindgen_func_elem_1135(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_1135(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_1140(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_1140(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_1186(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1186(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1191(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1191(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const GeoReferenceJsFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -1396,6 +1396,19 @@ export class IfcAPI {
         return takeObject(ret);
     }
     /**
+     * Raw-bytes variant of parseToGpuGeometry.
+     *
+     * This avoids constructing a giant JavaScript string before entering WASM.
+     * @param {Uint8Array} data
+     * @returns {GpuGeometry}
+     */
+    parseToGpuGeometryBytes(data) {
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export3);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.ifcapi_parseToGpuGeometryBytes(this.__wbg_ptr, ptr0, len0);
+        return GpuGeometry.__wrap(ret);
+    }
+    /**
      * Parse IFC file with streaming instanced geometry batches for progressive rendering
      * Groups identical geometries and yields batches of InstancedGeometry
      * Uses fast-first-frame streaming: simple geometry (walls, slabs) first
@@ -1438,6 +1451,20 @@ export class IfcAPI {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.ifcapi_parseToGpuInstancedGeometry(this.__wbg_ptr, ptr0, len0);
         return GpuInstancedGeometryCollection.__wrap(ret);
+    }
+    /**
+     * Raw-bytes variant of parseToGpuGeometryAsync.
+     *
+     * This avoids constructing a giant JavaScript string before entering WASM.
+     * @param {Uint8Array} data
+     * @param {any} options
+     * @returns {Promise<any>}
+     */
+    parseToGpuGeometryAsyncBytes(data, options) {
+        const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_export3);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.ifcapi_parseToGpuGeometryAsyncBytes(this.__wbg_ptr, ptr0, len0, addHeapObject(options));
+        return takeObject(ret);
     }
     /**
      * Parse IFC file with zero-copy mesh data
@@ -3081,7 +3108,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wasm_bindgen_func_elem_1186(a, state0.b, arg0, arg1);
+                    return __wasm_bindgen_func_elem_1191(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -3199,7 +3226,7 @@ function __wbg_get_imports() {
     };
     imports.wbg.__wbindgen_cast_69d24e7bda2eee11 = function(arg0, arg1) {
         // Cast intrinsic for `Closure(Closure { dtor_idx: 147, function: Function { arguments: [Externref], shim_idx: 148, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_1134, __wasm_bindgen_func_elem_1135);
+        const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_1139, __wasm_bindgen_func_elem_1140);
         return addHeapObject(ret);
     };
     imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {

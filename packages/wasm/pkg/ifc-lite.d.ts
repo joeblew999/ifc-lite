@@ -386,6 +386,12 @@ export class IfcAPI {
    */
   parseToGpuGeometryAsync(content: string, options: any): Promise<any>;
   /**
+   * Raw-bytes variant of parseToGpuGeometry.
+   *
+   * This avoids constructing a giant JavaScript string before entering WASM.
+   */
+  parseToGpuGeometryBytes(data: Uint8Array): GpuGeometry;
+  /**
    * Parse IFC file with streaming instanced geometry batches for progressive rendering
    * Groups identical geometries and yields batches of InstancedGeometry
    * Uses fast-first-frame streaming: simple geometry (walls, slabs) first
@@ -414,6 +420,12 @@ export class IfcAPI {
    * Returns a collection of instanced geometries with pointer access.
    */
   parseToGpuInstancedGeometry(content: string): GpuInstancedGeometryCollection;
+  /**
+   * Raw-bytes variant of parseToGpuGeometryAsync.
+   *
+   * This avoids constructing a giant JavaScript string before entering WASM.
+   */
+  parseToGpuGeometryAsyncBytes(data: Uint8Array, options: any): Promise<any>;
   /**
    * Parse IFC file with zero-copy mesh data
    * Maximum performance - returns mesh with direct memory access
@@ -1069,6 +1081,8 @@ export interface InitOutput {
   readonly ifcapi_parseSymbolicRepresentations: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseToGpuGeometry: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseToGpuGeometryAsync: (a: number, b: number, c: number, d: number) => number;
+  readonly ifcapi_parseToGpuGeometryAsyncBytes: (a: number, b: number, c: number, d: number) => number;
+  readonly ifcapi_parseToGpuGeometryBytes: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseToGpuInstancedGeometry: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseZeroCopy: (a: number, b: number, c: number) => number;
   readonly ifcapi_processGeometryBatch: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number, q: number, r: number, s: number, t: number) => number;
@@ -1181,9 +1195,9 @@ export interface InitOutput {
   readonly profileentryjs_expressId: (a: number) => number;
   readonly symboliccircle_expressId: (a: number) => number;
   readonly __wbg_gpuinstancedgeometryref_free: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_1135: (a: number, b: number, c: number) => void;
-  readonly __wasm_bindgen_func_elem_1134: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_1186: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_1140: (a: number, b: number, c: number) => void;
+  readonly __wasm_bindgen_func_elem_1139: (a: number, b: number) => void;
+  readonly __wasm_bindgen_func_elem_1191: (a: number, b: number, c: number, d: number) => void;
   readonly __wbindgen_export: (a: number) => void;
   readonly __wbindgen_export2: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export3: (a: number, b: number) => number;
