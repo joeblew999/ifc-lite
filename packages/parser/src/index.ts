@@ -97,6 +97,35 @@ export interface ParseOptions {
 }
 
 /**
+ * Detect and convert UTF-16 (LE/BE) encoded buffers to UTF-8.
+ * Some IFC exporters write UTF-16 with a BOM; the byte-level scanner
+ * expects UTF-8/ASCII so we need to transcode first.
+ * Also strips a UTF-8 BOM if present.
+ */
+function normalizeEncoding(buffer: ArrayBuffer): ArrayBuffer {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length < 2) return buffer;
+
+  // UTF-16 LE BOM: FF FE
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+    console.warn('[IfcParser] Detected UTF-16 LE encoding, converting to UTF-8');
+    const decoded = new TextDecoder('utf-16le').decode(buffer);
+    return new TextEncoder().encode(decoded).buffer as ArrayBuffer;
+  }
+  // UTF-16 BE BOM: FE FF
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+    console.warn('[IfcParser] Detected UTF-16 BE encoding, converting to UTF-8');
+    const decoded = new TextDecoder('utf-16be').decode(buffer);
+    return new TextEncoder().encode(decoded).buffer as ArrayBuffer;
+  }
+  // UTF-8 BOM: EF BB BF — strip it so the header check works
+  if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+    return buffer.slice(3);
+  }
+  return buffer;
+}
+
+/**
  * Main parser class
  */
 export class IfcParser {
@@ -104,6 +133,7 @@ export class IfcParser {
    * Parse IFC file into structured data
    */
   async parse(buffer: ArrayBuffer, options: ParseOptions = {}): Promise<ParseResult> {
+    buffer = normalizeEncoding(buffer);
     const uint8Buffer = new Uint8Array(buffer);
 
     // Phase 1: Scan for entities
@@ -182,6 +212,8 @@ export class IfcParser {
    * Properties are extracted lazily when accessed, not upfront.
    */
   async parseColumnar(buffer: ArrayBuffer, options: ParseOptions = {}): Promise<IfcDataStore> {
+    // Handle UTF-16 encoded IFC files (some exporters produce UTF-16 LE/BE with BOM)
+    buffer = normalizeEncoding(buffer);
     const uint8Buffer = new Uint8Array(buffer);
     const fileSizeMB = buffer.byteLength / (1024 * 1024);
     const scanStartTime = performance.now();

@@ -323,7 +323,17 @@ export function detectFormat(buffer: ArrayBuffer): 'ifcx' | 'ifc' | 'glb' | 'unk
   }
 
   const bytes = new Uint8Array(buffer, 0, Math.min(100, buffer.byteLength));
-  const start = new TextDecoder().decode(bytes).trim();
+
+  // Detect UTF-16 BOM — if present, decode with the correct encoding so the
+  // header text can be inspected. Some IFC exporters produce UTF-16 files.
+  let start: string;
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+    start = new TextDecoder('utf-16le').decode(bytes).trim();
+  } else if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+    start = new TextDecoder('utf-16be').decode(bytes).trim();
+  } else {
+    start = new TextDecoder().decode(bytes).trim();
+  }
 
   // IFCX is JSON starting with {
   if (start.startsWith('{')) {
