@@ -316,7 +316,7 @@ export class CameraControls {
   zoom(delta: number, mouseX?: number, mouseY?: number, canvasWidth?: number, canvasHeight?: number): void {
     const dir = sub(this.state.camera.position, this.state.camera.target);
     const distance = length(dir);
-    if (distance < 1e-6) return; // Degenerate: position ≈ target, nothing to zoom
+    if (distance < CC.MIN_PERSPECTIVE_DISTANCE) return; // Degenerate: position ≈ target, nothing to zoom
 
     const normalizedDelta = Math.sign(delta) * Math.min(Math.abs(delta) * CC.ZOOM_SENSITIVITY, CC.MAX_ZOOM_DELTA);
     const zoomFactor = 1 + normalizedDelta;
@@ -361,7 +361,7 @@ export class CameraControls {
   private zoomPerspective(distance: number, forward: Vec3, zoomFactor: number): void {
     const zoomStep = distance * (1 - zoomFactor); // positive when zooming in
     const dolly = zoomStep * 0.5;
-    const newDistance = Math.max(0.001, distance - dolly);
+    const newDistance = Math.max(CC.MIN_PERSPECTIVE_DISTANCE, distance - dolly);
 
     // Move target (and orbit center) forward to traverse the scene
     const dollyOffset = scale(forward, dolly);
