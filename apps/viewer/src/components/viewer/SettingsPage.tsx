@@ -224,7 +224,7 @@ export function SettingsPage() {
                   <div className="font-medium capitalize">{planTier} plan</div>
                   <p className="text-sm text-muted-foreground">{planSummary}</p>
                   <p className="text-sm text-muted-foreground">
-                    Desktop caches the latest validated plan locally so Pro grace can survive temporary auth or network loss.
+                    Desktop caches the latest validated plan locally and stores the auth bearer in native secure storage when available.
                   </p>
                 </div>
                 {isDesktopBillingEnforced() && !hasDesktopPro(desktopEntitlement) && (
