@@ -65,9 +65,11 @@ import { BulkPropertyEditor } from './BulkPropertyEditor';
 import { DataConnector } from './DataConnector';
 import { ExportChangesButton } from './ExportChangesButton';
 import { useFloorplanView } from '@/hooks/useFloorplanView';
+import { buildDesktopUpgradeUrl, hasDesktopFeatureAccess, type DesktopFeature } from '@/lib/desktop-product';
 import { recordRecentFiles, cacheFileBlobs } from '@/lib/recent-files';
 import { ThemeSwitch } from './ThemeSwitch';
 import { toast } from '@/components/ui/toast';
+import { navigateToPath } from '@/services/app-navigation';
 import { getStartupHarnessRequest, setActiveHarnessRequest, tryClaimStartupHarnessRequest } from '@/services/desktop-harness';
 import { logToDesktopTerminal } from '@/services/desktop-logger';
 import { openIfcFileDialog, type NativeFileHandle } from '@/services/file-dialog';
@@ -293,6 +295,7 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
   const setLensPanelVisible = useViewerStore((state) => state.setLensPanelVisible);
   const scriptPanelVisible = useViewerStore((state) => state.scriptPanelVisible);
   const setScriptPanelVisible = useViewerStore((state) => state.setScriptPanelVisible);
+  const chatHasPro = useViewerStore((state) => state.chatHasPro);
 
   // Check which type geometries exist across ALL loaded models (federation-aware).
   // PERF: Use meshes.length as dep proxy instead of full geometryResult, and
@@ -459,6 +462,19 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
     goHomeFromStore();
   }, []);
 
+  const promptDesktopUpgrade = useCallback((featureLabel: string) => {
+    toast.info(`${featureLabel} is available with Desktop Pro`);
+    navigateToPath(buildDesktopUpgradeUrl());
+  }, []);
+
+  const requireDesktopFeature = useCallback((feature: DesktopFeature, label: string) => {
+    if (hasDesktopFeatureAccess(chatHasPro, feature)) {
+      return true;
+    }
+    promptDesktopUpgrade(label);
+    return false;
+  }, [chatHasPro, promptDesktopUpgrade]);
+
   const handleToggleBottomPanel = useCallback((panel: 'script' | 'list') => {
     const isScriptPanel = panel === 'script';
     const nextScriptVisible = isScriptPanel ? !scriptPanelVisible : false;
@@ -473,6 +489,13 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
   }, [listPanelVisible, scriptPanelVisible, setListPanelVisible, setRightPanelCollapsed, setScriptPanelVisible]);
 
   const handleToggleRightPanel = useCallback((panel: 'bcf' | 'ids' | 'lens') => {
+    if (panel === 'bcf' && !requireDesktopFeature('bcf_issue_management', 'BCF issue management')) {
+      return;
+    }
+    if (panel === 'ids' && !requireDesktopFeature('ids_validation', 'IDS validation')) {
+      return;
+    }
+
     const nextBcfVisible = panel === 'bcf' ? !bcfPanelVisible : false;
     const nextIdsVisible = panel === 'ids' ? !idsPanelVisible : false;
     const nextLensVisible = panel === 'lens' ? !lensPanelVisible : false;
@@ -488,6 +511,7 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
     bcfPanelVisible,
     idsPanelVisible,
     lensPanelVisible,
+    requireDesktopFeature,
     setBcfPanelVisible,
     setIdsPanelVisible,
     setLensPanelVisible,
@@ -515,6 +539,7 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
   }, [activeWorkspacePanels]);
 
   const handleExportGLB = useCallback(() => {
+    if (!requireDesktopFeature('exports', 'Exports')) return;
     if (!geometryResult) return;
     try {
       const exporter = new GLTFExporter(geometryResult);
@@ -531,9 +556,10 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
       console.error('Export failed:', err);
       toast.error(`GLB export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [geometryResult]);
+  }, [geometryResult, requireDesktopFeature]);
 
   const handleScreenshot = useCallback(() => {
+    if (!requireDesktopFeature('exports', 'Exports')) return;
     const canvas = document.querySelector('canvas');
     if (!canvas) return;
     try {
@@ -547,9 +573,10 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
       console.error('Screenshot failed:', err);
       toast.error('Screenshot failed');
     }
-  }, []);
+  }, [requireDesktopFeature]);
 
   const handleExportCSV = useCallback((type: 'entities' | 'properties' | 'quantities' | 'spatial') => {
+    if (!requireDesktopFeature('exports', 'Exports')) return;
     if (!ifcDataStore) return;
     try {
       const exporter = new CSVExporter(ifcDataStore);
@@ -587,9 +614,10 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
       console.error('CSV export failed:', err);
       toast.error(`CSV export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [ifcDataStore]);
+  }, [ifcDataStore, requireDesktopFeature]);
 
   const handleExportJSON = useCallback(() => {
+    if (!requireDesktopFeature('exports', 'Exports')) return;
     if (!ifcDataStore) return;
     try {
       const entities: Record<string, unknown>[] = [];
@@ -617,7 +645,7 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
       console.error('JSON export failed:', err);
       toast.error(`JSON export failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [ifcDataStore]);
+  }, [ifcDataStore, requireDesktopFeature]);
 
   return (
     <div className="flex items-center gap-1 px-2 h-12 border-b bg-white dark:bg-black border-zinc-200 dark:border-zinc-800 relative z-50">
@@ -706,14 +734,21 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
-          <ExportDialog
-            trigger={
-              <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                <FileText className="h-4 w-4 mr-2" />
-                Export IFC (with changes)
-              </DropdownMenuItem>
-            }
-          />
+          {hasDesktopFeatureAccess(chatHasPro, 'exports') ? (
+            <ExportDialog
+              trigger={
+                <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Export IFC (with changes)
+                </DropdownMenuItem>
+              }
+            />
+          ) : (
+            <DropdownMenuItem onClick={() => promptDesktopUpgrade('Exports')}>
+              <FileText className="h-4 w-4 mr-2" />
+              Export IFC (with changes)
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleExportGLB}>
             <Download className="h-4 w-4 mr-2" />
@@ -790,7 +825,9 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
       </DropdownMenu>
 
       {/* Export Changes Button - shows when there are pending mutations */}
-      <ExportChangesButton />
+      {hasDesktopFeatureAccess(chatHasPro, 'exports') ? (
+        <ExportChangesButton />
+      ) : null}
 
       {/* ── Panels ── */}
       <DropdownMenu>
