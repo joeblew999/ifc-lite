@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-import React, { useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useRef, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import {
   FolderOpen,
   Download,
@@ -73,9 +73,15 @@ import { navigateToPath } from '@/services/app-navigation';
 import { getStartupHarnessRequest, setActiveHarnessRequest, tryClaimStartupHarnessRequest } from '@/services/desktop-harness';
 import { logToDesktopTerminal } from '@/services/desktop-logger';
 import { openIfcFileDialog, type NativeFileHandle } from '@/services/file-dialog';
+import {
+  closeActiveAnalysisExtension,
+  getAnalysisExtensionsSnapshot,
+  openAnalysisExtension,
+  subscribeAnalysisExtensions,
+} from '@/services/analysis-extensions';
 
 type Tool = 'select' | 'walk' | 'measure' | 'section';
-type WorkspacePanel = 'script' | 'list' | 'bcf' | 'ids' | 'lens';
+type WorkspacePanel = 'script' | 'list' | 'bcf' | 'ids' | 'lens' | string;
 
 function isNativeFileHandle(file: File | NativeFileHandle): file is NativeFileHandle {
   return typeof (file as NativeFileHandle).path === 'string';
@@ -296,6 +302,23 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
   const scriptPanelVisible = useViewerStore((state) => state.scriptPanelVisible);
   const setScriptPanelVisible = useViewerStore((state) => state.setScriptPanelVisible);
   const desktopEntitlement = useViewerStore((state) => state.desktopEntitlement);
+  const analysisExtensionState = useSyncExternalStore(
+    subscribeAnalysisExtensions,
+    getAnalysisExtensionsSnapshot,
+    getAnalysisExtensionsSnapshot,
+  );
+  const activeAnalysisExtension = useMemo(
+    () => analysisExtensionState.extensions.find((extension) => extension.id === analysisExtensionState.activeId) ?? null,
+    [analysisExtensionState.activeId, analysisExtensionState.extensions],
+  );
+  const rightAnalysisExtensions = useMemo(
+    () => analysisExtensionState.extensions.filter((extension) => (extension.placement ?? 'right') === 'right'),
+    [analysisExtensionState.extensions],
+  );
+  const bottomAnalysisExtensions = useMemo(
+    () => analysisExtensionState.extensions.filter((extension) => (extension.placement ?? 'right') === 'bottom'),
+    [analysisExtensionState.extensions],
+  );
 
   // Check which type geometries exist across ALL loaded models (federation-aware).
   // PERF: Use meshes.length as dep proxy instead of full geometryResult, and
@@ -476,6 +499,9 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
   }, [desktopEntitlement, promptDesktopUpgrade]);
 
   const handleToggleBottomPanel = useCallback((panel: 'script' | 'list') => {
+    if (activeAnalysisExtension?.placement === 'bottom') {
+      closeActiveAnalysisExtension();
+    }
     const isScriptPanel = panel === 'script';
     const nextScriptVisible = isScriptPanel ? !scriptPanelVisible : false;
     const nextListVisible = isScriptPanel ? false : !listPanelVisible;
@@ -486,9 +512,12 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
     if (nextScriptVisible || nextListVisible) {
       setRightPanelCollapsed(false);
     }
-  }, [listPanelVisible, scriptPanelVisible, setListPanelVisible, setRightPanelCollapsed, setScriptPanelVisible]);
+  }, [activeAnalysisExtension?.placement, listPanelVisible, scriptPanelVisible, setListPanelVisible, setRightPanelCollapsed, setScriptPanelVisible]);
 
   const handleToggleRightPanel = useCallback((panel: 'bcf' | 'ids' | 'lens') => {
+    if (activeAnalysisExtension?.placement !== 'bottom') {
+      closeActiveAnalysisExtension();
+    }
     if (panel === 'bcf' && !requireDesktopFeature('bcf_issue_management', 'BCF issue management')) {
       return;
     }
@@ -508,6 +537,7 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
       setRightPanelCollapsed(false);
     }
   }, [
+    activeAnalysisExtension?.placement,
     bcfPanelVisible,
     idsPanelVisible,
     lensPanelVisible,
@@ -518,6 +548,44 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
     setRightPanelCollapsed,
   ]);
 
+  const handleToggleAnalysisExtension = useCallback((id: string) => {
+    const extension = analysisExtensionState.extensions.find((candidate) => candidate.id === id);
+    if (!extension) {
+      return;
+    }
+
+    if (analysisExtensionState.activeId === id) {
+      closeActiveAnalysisExtension();
+      return;
+    }
+
+    const opened = openAnalysisExtension(id);
+    if (!opened) {
+      return;
+    }
+
+    if ((extension.placement ?? 'right') === 'bottom') {
+      setScriptPanelVisible(false);
+      setListPanelVisible(false);
+      setRightPanelCollapsed(false);
+      return;
+    }
+
+    setBcfPanelVisible(false);
+    setIdsPanelVisible(false);
+    setLensPanelVisible(false);
+    setRightPanelCollapsed(false);
+  }, [
+    analysisExtensionState.activeId,
+    analysisExtensionState.extensions,
+    setBcfPanelVisible,
+    setIdsPanelVisible,
+    setLensPanelVisible,
+    setListPanelVisible,
+    setRightPanelCollapsed,
+    setScriptPanelVisible,
+  ]);
+
   const activeWorkspacePanels = useMemo(() => {
     const panels = new Set<WorkspacePanel>();
     if (scriptPanelVisible) panels.add('script');
@@ -525,8 +593,16 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
     if (bcfPanelVisible) panels.add('bcf');
     if (idsPanelVisible) panels.add('ids');
     if (lensPanelVisible) panels.add('lens');
+    if (analysisExtensionState.activeId) panels.add(analysisExtensionState.activeId);
     return panels;
-  }, [bcfPanelVisible, idsPanelVisible, lensPanelVisible, listPanelVisible, scriptPanelVisible]);
+  }, [
+    analysisExtensionState.activeId,
+    bcfPanelVisible,
+    idsPanelVisible,
+    lensPanelVisible,
+    listPanelVisible,
+    scriptPanelVisible,
+  ]);
 
   const workspacePanelLabel = useMemo(() => {
     if (activeWorkspacePanels.size === 0) return null;
@@ -535,8 +611,9 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
     if (activeWorkspacePanels.has('list')) return 'Lists';
     if (activeWorkspacePanels.has('bcf')) return 'BCF Issues';
     if (activeWorkspacePanels.has('ids')) return 'IDS Validation';
-    return 'Lens Rules';
-  }, [activeWorkspacePanels]);
+    if (activeWorkspacePanels.has('lens')) return 'Lens Rules';
+    return activeAnalysisExtension?.label ?? 'Analysis';
+  }, [activeAnalysisExtension?.label, activeWorkspacePanels]);
 
   const handleExportGLB = useCallback(() => {
     if (!requireDesktopFeature('exports', 'Exports')) return;
@@ -883,6 +960,42 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
             <Palette className="h-4 w-4 mr-2" />
             Lens Rules
           </DropdownMenuCheckboxItem>
+          {rightAnalysisExtensions.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              {rightAnalysisExtensions.map((extension) => {
+                const Icon = extension.icon;
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={extension.id}
+                    checked={activeWorkspacePanels.has(extension.id)}
+                    onCheckedChange={() => handleToggleAnalysisExtension(extension.id)}
+                  >
+                    <Icon className="h-4 w-4 mr-2" />
+                    {extension.label}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+            </>
+          )}
+          {bottomAnalysisExtensions.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              {bottomAnalysisExtensions.map((extension) => {
+                const Icon = extension.icon;
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={extension.id}
+                    checked={activeWorkspacePanels.has(extension.id)}
+                    onCheckedChange={() => handleToggleAnalysisExtension(extension.id)}
+                  >
+                    <Icon className="h-4 w-4 mr-2" />
+                    {extension.label}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

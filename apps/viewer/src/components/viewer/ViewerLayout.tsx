@@ -23,6 +23,12 @@ import { ListPanel } from './lists/ListPanel';
 import { ScriptPanel } from './ScriptPanel';
 import { CommandPalette } from './CommandPalette';
 import { DesktopEntitlementBanner } from './DesktopEntitlementBanner';
+import {
+  closeActiveAnalysisExtension,
+  getAnalysisExtensionById,
+  getAnalysisExtensionsSnapshot,
+  subscribeAnalysisExtensions,
+} from '@/services/analysis-extensions';
 
 const BOTTOM_PANEL_MIN_HEIGHT = 120;
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 300;
@@ -78,6 +84,18 @@ export function ViewerLayout() {
   const setLensPanelVisible = useViewerStore((s) => s.setLensPanelVisible);
   const scriptPanelVisible = useViewerStore((s) => s.scriptPanelVisible);
   const setScriptPanelVisible = useViewerStore((s) => s.setScriptPanelVisible);
+  const analysisExtensionState = useSyncExternalStore(
+    subscribeAnalysisExtensions,
+    getAnalysisExtensionsSnapshot,
+    getAnalysisExtensionsSnapshot,
+  );
+  const activeAnalysisExtension = getAnalysisExtensionById(analysisExtensionState.activeId);
+  const activeRightAnalysisExtension = (activeAnalysisExtension?.placement ?? 'right') === 'right'
+    ? activeAnalysisExtension
+    : null;
+  const activeBottomAnalysisExtension = activeAnalysisExtension?.placement === 'bottom'
+    ? activeAnalysisExtension
+    : null;
 
   // Panel refs for programmatic collapse/expand (command palette, keyboard shortcuts)
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
@@ -235,7 +253,9 @@ export function ViewerLayout() {
                   }}
                 >
                   <div className="h-full w-full overflow-hidden panel-container">
-                    {lensPanelVisible ? (
+                    {activeRightAnalysisExtension ? (
+                      activeRightAnalysisExtension.renderPanel({ onClose: closeActiveAnalysisExtension })
+                    ) : lensPanelVisible ? (
                       <LensPanel onClose={() => setLensPanelVisible(false)} />
                     ) : idsPanelVisible ? (
                       <IDSPanel onClose={() => setIdsPanelVisible(false)} />
@@ -250,7 +270,7 @@ export function ViewerLayout() {
             </div>
 
             {/* Bottom Panel - Lists or Script (custom resizable, outside PanelGroup) */}
-            {(listPanelVisible || scriptPanelVisible) && (
+            {(listPanelVisible || scriptPanelVisible || !!activeBottomAnalysisExtension) && (
               <div style={{ height: bottomHeight, flexShrink: 0 }} className="relative">
                 {/* Drag handle */}
                 <div
@@ -258,7 +278,9 @@ export function ViewerLayout() {
                   onMouseDown={handleResizeStart}
                 />
                 <div className="h-full w-full overflow-hidden border-t pt-1.5">
-                  {scriptPanelVisible ? (
+                  {activeBottomAnalysisExtension ? (
+                    activeBottomAnalysisExtension.renderPanel({ onClose: closeActiveAnalysisExtension })
+                  ) : scriptPanelVisible ? (
                     <ScriptPanel onClose={() => setScriptPanelVisible(false)} />
                   ) : (
                     <ListPanel onClose={() => setListPanelVisible(false)} />
@@ -303,7 +325,7 @@ export function ViewerLayout() {
               <div className="absolute inset-x-0 bottom-0 h-[50vh] bg-background border-t rounded-t-xl shadow-xl z-40 animate-in slide-in-from-bottom">
                 <div className="flex items-center justify-between p-2 border-b">
                   <span className="font-medium text-sm">
-                    {scriptPanelVisible ? 'Script' : listPanelVisible ? 'Lists' : lensPanelVisible ? 'Lens' : idsPanelVisible ? 'IDS Validation' : bcfPanelVisible ? 'BCF Issues' : 'Properties'}
+                    {activeAnalysisExtension ? activeAnalysisExtension.label : scriptPanelVisible ? 'Script' : listPanelVisible ? 'Lists' : lensPanelVisible ? 'Lens' : idsPanelVisible ? 'IDS Validation' : bcfPanelVisible ? 'BCF Issues' : 'Properties'}
                   </span>
                   <button
                     className="p-1 hover:bg-muted rounded"
@@ -314,6 +336,7 @@ export function ViewerLayout() {
                       if (bcfPanelVisible) setBcfPanelVisible(false);
                       if (lensPanelVisible) setLensPanelVisible(false);
                       if (idsPanelVisible) setIdsPanelVisible(false);
+                      if (activeAnalysisExtension) closeActiveAnalysisExtension();
                     }}
                   >
                     <span className="sr-only">Close</span>
@@ -323,7 +346,11 @@ export function ViewerLayout() {
                   </button>
                 </div>
                 <div className="h-[calc(50vh-48px)] overflow-auto">
-                  {scriptPanelVisible ? (
+                  {activeBottomAnalysisExtension ? (
+                    activeBottomAnalysisExtension.renderPanel({ onClose: closeActiveAnalysisExtension })
+                  ) : activeRightAnalysisExtension ? (
+                    activeRightAnalysisExtension.renderPanel({ onClose: closeActiveAnalysisExtension })
+                  ) : scriptPanelVisible ? (
                     <ScriptPanel onClose={() => setScriptPanelVisible(false)} />
                   ) : listPanelVisible ? (
                     <ListPanel onClose={() => setListPanelVisible(false)} />
