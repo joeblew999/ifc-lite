@@ -46,8 +46,9 @@ export class RenderPipeline {
 
         // Check MSAA support and adjust sample count
         // 4x MSAA provides good anti-aliasing for thin geometry
+        // Mobile GPUs may reject MSAA>1 with certain format/target combos → force 1
         const maxSampleCount = (this.device as any).limits?.maxSampleCount ?? 4;
-        this.sampleCount = Math.min(4, maxSampleCount);
+        this.sampleCount = this.singleTargetMode ? 1 : Math.min(4, maxSampleCount);
 
         // Create depth texture with MSAA support
         this.depthTexture = this.device.createTexture({
@@ -110,16 +111,31 @@ export class RenderPipeline {
         // In single-target mode, strip the second fragment output for mobile GPU compatibility
         let shaderCode = mainShaderSource;
         if (this.singleTargetMode) {
-            shaderCode = shaderCode
-                .replace(
-                    'struct FragmentOutput {\n          @location(0) color: vec4<f32>,\n          @location(1) objectIdEncoded: vec4<f32>,\n        }',
-                    'struct FragmentOutput {\n          @location(0) color: vec4<f32>,\n        }'
-                )
-                .replace('out.objectIdEncoded = encodeId24(input.entityId);', '');
+            // Remove the objectId field from FragmentOutput struct
+            shaderCode = shaderCode.replace(
+                /@location\(1\)\s+objectIdEncoded\s*:\s*vec4<f32>,/,
+                ''
+            );
+            // Remove the objectId assignment
+            shaderCode = shaderCode.replace(
+                /out\.objectIdEncoded\s*=\s*encodeId24\([^)]*\)\s*;/,
+                ''
+            );
+            console.log('[Pipeline] Single-target shader: removed objectId output');
         }
         const shaderModule = this.device.createShaderModule({
             code: shaderCode,
         });
+        // Check for shader compilation errors (async, for diagnostics)
+        if (shaderModule.getCompilationInfo) {
+            shaderModule.getCompilationInfo().then((info) => {
+                for (const msg of info.messages) {
+                    if (msg.type === 'error') {
+                        console.error(`[Shader] Compile error: ${msg.message} (line ${msg.lineNum})`);
+                    }
+                }
+            });
+        }
 
         // Create explicit pipeline layout (shared between main and selection pipelines)
         const pipelineLayout = this.device.createPipelineLayout({
