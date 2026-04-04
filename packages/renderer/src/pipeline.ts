@@ -206,23 +206,79 @@ export class RenderPipeline {
             multisample: { count: this.sampleCount },
         } as GPURenderPipelineDescriptor);
 
-        // --- Create main pipeline with fallback ---
+        // Helper to build ALL pipeline variants from a given shader module
+        const buildAllPipelines = (mod: GPUShaderModule) => {
+            this.pipeline = this.device.createRenderPipeline(makeDesc(mod, 'ifc-main'));
+
+            this.selectionPipeline = this.device.createRenderPipeline({
+                ...makeDesc(mod, 'ifc-selection'),
+                depthStencil: {
+                    format: this.depthFormat,
+                    depthWriteEnabled: false,
+                    depthCompare: 'greater-equal',
+                    depthBias: 0,
+                },
+            } as GPURenderPipelineDescriptor);
+
+            const transparentTargets: GPUColorTargetState[] = this.singleTargetMode
+                ? [{
+                    format: this.colorFormat,
+                    blend: {
+                        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
+                        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+                    },
+                }]
+                : [{
+                    format: this.colorFormat,
+                    blend: {
+                        color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
+                        alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+                    },
+                }, { format: 'rgba8unorm' }];
+
+            this.transparentPipeline = this.device.createRenderPipeline({
+                label: 'ifc-transparent',
+                layout: pipelineLayout,
+                vertex: makeDesc(mod, '').vertex,
+                fragment: { module: mod, entryPoint: 'fs_main', targets: transparentTargets },
+                primitive: { topology: 'triangle-list', cullMode: 'none' },
+                depthStencil: { format: this.depthFormat, depthWriteEnabled: false, depthCompare: 'greater' },
+                multisample: { count: this.sampleCount },
+            } as GPURenderPipelineDescriptor);
+
+            this.overlayPipeline = this.device.createRenderPipeline({
+                label: 'ifc-overlay',
+                layout: pipelineLayout,
+                vertex: makeDesc(mod, '').vertex,
+                fragment: { module: mod, entryPoint: 'fs_main', targets: colorTargets },
+                primitive: { topology: 'triangle-list', cullMode: 'none' },
+                depthStencil: { format: this.depthFormat, depthWriteEnabled: false, depthCompare: 'equal' },
+                multisample: { count: this.sampleCount },
+            } as GPURenderPipelineDescriptor);
+        };
+
+        // Build all pipelines with main shader
+        buildAllPipelines(shaderModule);
+
+        // Check if main pipeline is valid — if not, rebuild ALL with fallback shader
         this.device.pushErrorScope('validation');
-        this.pipeline = this.device.createRenderPipeline(makeDesc(shaderModule, 'ifc-main'));
+        // Force a validation check by trying to use the pipeline
+        void this.device.createRenderPipeline(makeDesc(shaderModule, 'ifc-validate'));
         this.device.popErrorScope().then((error) => {
             if (!error) {
-                console.log('[Pipeline] Main pipeline OK');
+                console.log('[Pipeline] All pipelines OK');
                 return;
             }
             const msg = error.message || String(error);
-            console.error('[Pipeline] Main pipeline FAILED:', msg);
-            this._pipelineError = `main: ${msg.slice(0, 100)}`;
+            console.error('[Pipeline] Shader failed:', msg.slice(0, 100));
+            this._pipelineError = `rebuilding with fallback...`;
 
-            // --- FALLBACK: try minimal shader ---
-            console.log('[Pipeline] Trying fallback shader...');
+            // Rebuild ALL pipelines with the fallback shader
+            console.log('[Pipeline] Rebuilding ALL pipelines with fallback shader...');
             const fbModule = this.device.createShaderModule({ code: FALLBACK_SHADER });
+
             this.device.pushErrorScope('validation');
-            this.pipeline = this.device.createRenderPipeline(makeDesc(fbModule, 'ifc-fallback'));
+            buildAllPipelines(fbModule);
             this.device.popErrorScope().then((err2) => {
                 if (err2) {
                     this._pipelineError = `BOTH: ${err2.message?.slice(0, 80)}`;
@@ -230,60 +286,10 @@ export class RenderPipeline {
                 } else {
                     this._pipelineError = 'using fallback shader';
                     this._usingFallback = true;
-                    console.log('[Pipeline] Fallback shader OK');
+                    console.log('[Pipeline] All fallback pipelines OK');
                 }
             });
         });
-
-        // --- Selection pipeline (same shader, depth read-only) ---
-        const selectionDesc: GPURenderPipelineDescriptor = {
-            ...makeDesc(shaderModule, 'ifc-selection'),
-            depthStencil: {
-                format: this.depthFormat,
-                depthWriteEnabled: false,
-                depthCompare: 'greater-equal',
-                depthBias: 0,
-            },
-        };
-        this.selectionPipeline = this.device.createRenderPipeline(selectionDesc);
-
-        // --- Transparent pipeline (alpha blending) ---
-        const transparentTargets: GPUColorTargetState[] = this.singleTargetMode
-            ? [{
-                format: this.colorFormat,
-                blend: {
-                    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-                    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-                },
-            }]
-            : [{
-                format: this.colorFormat,
-                blend: {
-                    color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
-                    alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
-                },
-            }, { format: 'rgba8unorm' }];
-
-        this.transparentPipeline = this.device.createRenderPipeline({
-            label: 'ifc-transparent',
-            layout: pipelineLayout,
-            vertex: makeDesc(shaderModule, '').vertex,
-            fragment: { module: shaderModule, entryPoint: 'fs_main', targets: transparentTargets },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: this.depthFormat, depthWriteEnabled: false, depthCompare: 'greater' },
-            multisample: { count: this.sampleCount },
-        } as GPURenderPipelineDescriptor);
-
-        // --- Overlay pipeline (depth-equal for lens coloring) ---
-        this.overlayPipeline = this.device.createRenderPipeline({
-            label: 'ifc-overlay',
-            layout: pipelineLayout,
-            vertex: makeDesc(shaderModule, '').vertex,
-            fragment: { module: shaderModule, entryPoint: 'fs_main', targets: colorTargets },
-            primitive: { topology: 'triangle-list', cullMode: 'none' },
-            depthStencil: { format: this.depthFormat, depthWriteEnabled: false, depthCompare: 'equal' },
-            multisample: { count: this.sampleCount },
-        } as GPURenderPipelineDescriptor);
 
         // Bind group
         this.bindGroup = this.device.createBindGroup({
