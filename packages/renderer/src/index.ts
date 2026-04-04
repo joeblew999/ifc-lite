@@ -167,7 +167,11 @@ export class Renderer {
             this.canvas.height = height;
         }
 
-        this.pipeline = new RenderPipeline(this.device, width, height);
+        // On mobile GPUs, MRT (dual color targets) + MSAA often fails pipeline
+        // validation. Use single-target mode which drops the objectId output.
+        const isMobile = typeof navigator !== 'undefined' &&
+            /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        this.pipeline = new RenderPipeline(this.device, width, height, isMobile);
         this.instancedPipeline = new InstancedRenderPipeline(this.device, width, height);
         this.picker = new Picker(this.device, width, height);
         this.sectionPlaneRenderer = new SectionPlaneRenderer(
@@ -986,24 +990,29 @@ export class Renderer {
             const msaaView = this.pipeline.getMultisampleTextureView();
             const useMSAA = msaaView !== null && this.pipeline.getSampleCount() > 1;
 
+            // Build color attachments — skip objectId in single-target mode
+            const colorAttachments: GPURenderPassColorAttachment[] = [
+                {
+                    // If MSAA enabled: render to multisample texture, resolve to swap chain
+                    // If MSAA disabled: render directly to swap chain
+                    view: useMSAA ? msaaView : textureView,
+                    resolveTarget: useMSAA ? textureView : undefined,
+                    loadOp: 'clear' as const,
+                    clearValue: clearColor,
+                    storeOp: (useMSAA ? 'discard' : 'store') as GPUStoreOp,
+                },
+            ];
+            if (!this.pipeline.isSingleTarget()) {
+                colorAttachments.push({
+                    view: objectIdView,
+                    loadOp: 'clear' as const,
+                    clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                    storeOp: (needsObjectIdPass ? 'store' : 'discard') as GPUStoreOp,
+                });
+            }
+
             const pass = encoder.beginRenderPass({
-                colorAttachments: [
-                    {
-                        // If MSAA enabled: render to multisample texture, resolve to swap chain
-                        // If MSAA disabled: render directly to swap chain
-                        view: useMSAA ? msaaView : textureView,
-                        resolveTarget: useMSAA ? textureView : undefined,
-                        loadOp: 'clear',
-                        clearValue: clearColor,
-                        storeOp: useMSAA ? 'discard' : 'store',  // Discard MSAA buffer after resolve
-                    },
-                    {
-                        view: objectIdView,
-                        loadOp: 'clear',
-                        clearValue: { r: 0, g: 0, b: 0, a: 0 },
-                        storeOp: needsObjectIdPass ? 'store' : 'discard',
-                    },
-                ],
+                colorAttachments,
                 depthStencilAttachment: {
                     view: this.pipeline.getDepthTextureView(),
                     depthClearValue: 0.0,  // Reverse-Z: clear to 0.0 (far plane)

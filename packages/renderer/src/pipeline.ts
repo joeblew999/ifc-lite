@@ -32,13 +32,17 @@ export class RenderPipeline {
     private bindGroupLayout: GPUBindGroupLayout;  // Explicit layout shared between pipelines
     private currentWidth: number;
     private currentHeight: number;
+    /** When true, pipeline uses a single color target (no objectId MRT).
+     *  Mobile GPUs often reject MRT + MSAA pipeline combinations. */
+    private singleTargetMode: boolean = false;
 
-    constructor(device: WebGPUDevice, width: number = 1, height: number = 1) {
+    constructor(device: WebGPUDevice, width: number = 1, height: number = 1, singleTarget: boolean = false) {
         this.currentWidth = width;
         this.currentHeight = height;
         this.webgpuDevice = device;
         this.device = device.getDevice();
         this.colorFormat = device.getFormat();
+        this.singleTargetMode = singleTarget;
 
         // Check MSAA support and adjust sample count
         // 4x MSAA provides good anti-aliasing for thin geometry
@@ -53,13 +57,23 @@ export class RenderPipeline {
             sampleCount: this.sampleCount > 1 ? this.sampleCount : 1,
         });
         this.depthTextureView = this.depthTexture.createView();
-        this.objectIdTexture = this.device.createTexture({
-            size: { width, height },
-            format: this.objectIdFormat,
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-            sampleCount: this.sampleCount > 1 ? this.sampleCount : 1,
-        });
-        this.objectIdTextureView = this.objectIdTexture.createView();
+        if (!this.singleTargetMode) {
+            this.objectIdTexture = this.device.createTexture({
+                size: { width, height },
+                format: this.objectIdFormat,
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+                sampleCount: this.sampleCount > 1 ? this.sampleCount : 1,
+            });
+            this.objectIdTextureView = this.objectIdTexture.createView();
+        } else {
+            // Dummy 1x1 — never attached to render pass in single-target mode
+            this.objectIdTexture = this.device.createTexture({
+                size: { width: 1, height: 1 },
+                format: this.objectIdFormat,
+                usage: GPUTextureUsage.RENDER_ATTACHMENT,
+            });
+            this.objectIdTextureView = this.objectIdTexture.createView();
+        }
 
         // Create multisample color texture for MSAA
         if (this.sampleCount > 1) {
@@ -93,14 +107,29 @@ export class RenderPipeline {
         });
 
         // Create shader module with PBR lighting, section plane clipping, and selection outline
+        // In single-target mode, strip the second fragment output for mobile GPU compatibility
+        let shaderCode = mainShaderSource;
+        if (this.singleTargetMode) {
+            shaderCode = shaderCode
+                .replace(
+                    'struct FragmentOutput {\n          @location(0) color: vec4<f32>,\n          @location(1) objectIdEncoded: vec4<f32>,\n        }',
+                    'struct FragmentOutput {\n          @location(0) color: vec4<f32>,\n        }'
+                )
+                .replace('out.objectIdEncoded = encodeId24(input.entityId);', '');
+        }
         const shaderModule = this.device.createShaderModule({
-            code: mainShaderSource,
+            code: shaderCode,
         });
 
         // Create explicit pipeline layout (shared between main and selection pipelines)
         const pipelineLayout = this.device.createPipelineLayout({
             bindGroupLayouts: [this.bindGroupLayout],
         });
+
+        // Color targets: single target on mobile (no objectId MRT)
+        const colorTargets: GPUColorTargetState[] = this.singleTargetMode
+            ? [{ format: this.colorFormat }]
+            : [{ format: this.colorFormat }, { format: 'rgba8unorm' }];
 
         // Create render pipeline descriptor
         const pipelineDescriptor: GPURenderPipelineDescriptor = {
@@ -122,7 +151,7 @@ export class RenderPipeline {
             fragment: {
                 module: shaderModule,
                 entryPoint: 'fs_main',
-                targets: [{ format: this.colorFormat }, { format: 'rgba8unorm' }],
+                targets: colorTargets,
             },
             primitive: {
                 topology: 'triangle-list',
@@ -161,7 +190,7 @@ export class RenderPipeline {
             fragment: {
                 module: shaderModule,
                 entryPoint: 'fs_main',
-                targets: [{ format: this.colorFormat }, { format: 'rgba8unorm' }],
+                targets: colorTargets,
             },
             primitive: {
                 topology: 'triangle-list',
@@ -256,7 +285,7 @@ export class RenderPipeline {
             fragment: {
                 module: shaderModule,
                 entryPoint: 'fs_main',
-                targets: [{ format: this.colorFormat }, { format: 'rgba8unorm' }],
+                targets: colorTargets,
             },
             primitive: {
                 topology: 'triangle-list',
@@ -368,13 +397,16 @@ export class RenderPipeline {
             sampleCount: this.sampleCount > 1 ? this.sampleCount : 1,
         });
         this.depthTextureView = this.depthTexture.createView();
-        this.objectIdTexture = this.device.createTexture({
-            size: { width, height },
-            format: this.objectIdFormat,
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-            sampleCount: this.sampleCount > 1 ? this.sampleCount : 1,
-        });
-        this.objectIdTextureView = this.objectIdTexture.createView();
+        if (!this.singleTargetMode) {
+            this.objectIdTexture.destroy();
+            this.objectIdTexture = this.device.createTexture({
+                size: { width, height },
+                format: this.objectIdFormat,
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+                sampleCount: this.sampleCount > 1 ? this.sampleCount : 1,
+            });
+            this.objectIdTextureView = this.objectIdTexture.createView();
+        }
 
         // Recreate multisample texture
         if (this.multisampleTexture) {
@@ -430,6 +462,11 @@ export class RenderPipeline {
      */
     getSampleCount(): number {
         return this.sampleCount;
+    }
+
+    /** Returns true when using single-target mode (no objectId MRT) */
+    isSingleTarget(): boolean {
+        return this.singleTargetMode;
     }
 
     getBindGroup(): GPUBindGroup {
