@@ -313,7 +313,7 @@ export class CameraControls {
    * @param canvasWidth - Canvas width
    * @param canvasHeight - Canvas height
    */
-  zoom(delta: number, mouseX?: number, mouseY?: number, canvasWidth?: number, canvasHeight?: number): void {
+  zoom(delta: number, mouseX?: number, mouseY?: number, canvasWidth?: number, canvasHeight?: number, fastZoom?: boolean): void {
     const dir = sub(this.state.camera.position, this.state.camera.target);
     const distance = length(dir);
     if (distance < 1e-6) return; // Degenerate: position ≈ target, nothing to zoom
@@ -336,7 +336,7 @@ export class CameraControls {
       if (mouseX !== undefined && mouseY !== undefined && canvasWidth && canvasHeight) {
         this.shiftTargetTowardsMouse(dir, distance, forward, zoomFactor, mouseX, mouseY, canvasWidth, canvasHeight);
       }
-      this.zoomPerspective(distance, forward, zoomFactor);
+      this.zoomPerspective(distance, forward, zoomFactor, fastZoom);
     }
 
     this.updateMatrices();
@@ -358,10 +358,15 @@ export class CameraControls {
    * but can never pass it. By splitting each zoom step into distance reduction +
    * forward dolly, the camera always makes real progress through the scene.
    */
-  private zoomPerspective(distance: number, forward: Vec3, zoomFactor: number): void {
+  private zoomPerspective(distance: number, forward: Vec3, zoomFactor: number, fastZoom?: boolean): void {
     const zoomStep = distance * (1 - zoomFactor); // positive when zooming in
-    const dolly = zoomStep * 0.5;
-    const newDistance = Math.max(0.001, distance - dolly);
+
+    // Fast zoom (Shift+scroll or Cesium mode): pure dolly — the full zoom step
+    // translates the rig forward, distance stays constant, no Zeno slow-down.
+    // Normal zoom: half dolly + half distance reduction — gives zoom-to-cursor
+    // convergence but decelerates as the camera approaches the target.
+    const dolly = fastZoom ? zoomStep : zoomStep * 0.5;
+    const newDistance = fastZoom ? distance : Math.max(0.001, distance - zoomStep * 0.5);
 
     // Move target (and orbit center) forward to traverse the scene
     const dollyOffset = scale(forward, dolly);
