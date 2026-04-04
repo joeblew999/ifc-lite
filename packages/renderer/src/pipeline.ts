@@ -31,6 +31,7 @@ const FALLBACK_SHADER = `
     struct VSOut {
       @builtin(position) position: vec4<f32>,
       @location(0) normal: vec3<f32>,
+      @location(1) worldPos: vec3<f32>,
     }
 
     @vertex
@@ -39,18 +40,71 @@ const FALLBACK_SHADER = `
       let wp = uniforms.model * vec4<f32>(pos, 1.0);
       o.position = uniforms.viewProj * wp;
       o.normal = normalize((uniforms.model * vec4<f32>(norm, 0.0)).xyz);
+      o.worldPos = wp.xyz;
       return o;
+    }
+
+    // Simple ACES tone mapping (Narkowicz 2015 fit)
+    fn acesToneMap(x: vec3<f32>) -> vec3<f32> {
+      let a = x * (x * 2.51 + vec3<f32>(0.03));
+      let b = x * (x * 2.43 + vec3<f32>(0.59)) + vec3<f32>(0.14);
+      return a / b;
     }
 
     struct FSOut { @location(0) color: vec4<f32>, }
 
     @fragment
     fn fs_main(input: VSOut) -> FSOut {
+      // Section plane clipping
+      if (uniforms.flags.y == 1u) {
+        let plane = uniforms.sectionPlane;
+        let dist = dot(plane.xyz, input.worldPos) + plane.w;
+        if (dist > 0.0) { discard; }
+      }
+
       let N = normalize(input.normal);
-      let L = normalize(vec3<f32>(0.5, 1.0, 0.3));
-      let diff = max(abs(dot(N, L)), 0.15);
-      var color = uniforms.baseColor.rgb * diff;
+
+      // Key light (upper-right)
+      let L1 = normalize(vec3<f32>(0.5, 1.0, 0.3));
+      let NdotL1 = abs(dot(N, L1));
+
+      // Fill light (opposite, softer)
+      let L2 = normalize(vec3<f32>(-0.4, -0.3, -0.6));
+      let NdotL2 = abs(dot(N, L2));
+
+      // Hemisphere ambient: sky blue above, warm brown below
+      let skyColor = vec3<f32>(0.40, 0.50, 0.65);
+      let groundColor = vec3<f32>(0.25, 0.20, 0.15);
+      let upFactor = N.y * 0.5 + 0.5;
+      let ambient = mix(groundColor, skyColor, upFactor) * 0.35;
+
+      // Diffuse lighting (two-sided via abs)
+      let keyDiff = NdotL1 * 0.65;
+      let fillDiff = NdotL2 * 0.25;
+      let albedo = uniforms.baseColor.rgb;
+      var color = albedo * (ambient + keyDiff + fillDiff);
+
+      // Rim / edge darkening (fresnel-like, using approximate view direction)
+      let viewDir = normalize(-input.worldPos);
+      let NdotV = abs(dot(N, viewDir));
+      let rim = 1.0 - NdotV;
+      let rimDarken = 1.0 - rim * rim * 0.3;
+      color = color * rimDarken;
+
+      // Subtle contrast enhancement
+      color = color * color * (3.0 - 2.0 * color);
+
+      // ACES tone mapping
+      color = acesToneMap(color);
+
+      // Gamma correction
       color = pow(color, vec3<f32>(1.0 / 2.2));
+
+      // Selection highlight (tint blue)
+      if (uniforms.flags.x == 1u) {
+        color = mix(color, vec3<f32>(0.3, 0.5, 1.0), 0.35);
+      }
+
       var o: FSOut;
       o.color = vec4<f32>(color, uniforms.baseColor.a);
       return o;

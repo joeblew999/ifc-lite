@@ -177,7 +177,8 @@ export function useTouchControls(params: UseTouchControlsParams): void {
 
         const zoomDelta = distance - touchState.lastDistance;
         const rect = canvas.getBoundingClientRect();
-        camera.zoom(zoomDelta * 10, false, centerX - rect.left, centerY - rect.top, canvas.width, canvas.height);
+        // Scale zoom by 5x for natural pinch feel (not too fast, not too slow)
+        camera.zoom(zoomDelta * 5, false, centerX - rect.left, centerY - rect.top, canvas.width, canvas.height);
 
         touchState.lastDistance = distance;
         touchState.lastCenter = { x: centerX, y: centerY };
