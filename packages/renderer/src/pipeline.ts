@@ -206,6 +206,20 @@ export class RenderPipeline {
             }],
         });
 
+        // Bind group
+        this.bindGroup = this.device.createBindGroup({
+            layout: this.bindGroupLayout,
+            entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }],
+        });
+    }
+
+    /**
+     * Async pipeline initialization. Creates shader module, attempts main shader
+     * pipeline via createRenderPipelineAsync, and falls back to the minimal
+     * FALLBACK_SHADER if the main shader is rejected by the GPU driver.
+     * Must be awaited before any rendering.
+     */
+    async init(): Promise<void> {
         // --- Shader preparation ---
         let shaderCode = mainShaderSource;
         if (this.singleTargetMode) {
@@ -215,20 +229,6 @@ export class RenderPipeline {
             shaderCode = shaderCode.replace(
                 /out\.objectIdEncoded\s*=\s*encodeId24\([^)]*\)\s*;/, ''
             );
-        }
-
-        const shaderModule = this.device.createShaderModule({ code: shaderCode });
-
-        // Check shader compilation
-        if (shaderModule.getCompilationInfo) {
-            shaderModule.getCompilationInfo().then((info) => {
-                for (const msg of info.messages) {
-                    if (msg.type === 'error') {
-                        this._pipelineError = `shader: ${msg.message} (L${msg.lineNum})`;
-                        console.error('[Shader] Compile error:', msg.message, 'line', msg.lineNum);
-                    }
-                }
-            });
         }
 
         const pipelineLayout = this.device.createPipelineLayout({
@@ -260,11 +260,11 @@ export class RenderPipeline {
             multisample: { count: this.sampleCount },
         } as GPURenderPipelineDescriptor);
 
-        // Helper to build ALL pipeline variants from a given shader module
-        const buildAllPipelines = (mod: GPUShaderModule) => {
-            this.pipeline = this.device.createRenderPipeline(makeDesc(mod, 'ifc-main'));
+        // Helper to build ALL pipeline variants from a given shader module (async)
+        const buildAllPipelines = async (mod: GPUShaderModule) => {
+            this.pipeline = await this.device.createRenderPipelineAsync(makeDesc(mod, 'ifc-main'));
 
-            this.selectionPipeline = this.device.createRenderPipeline({
+            this.selectionPipeline = await this.device.createRenderPipelineAsync({
                 ...makeDesc(mod, 'ifc-selection'),
                 depthStencil: {
                     format: this.depthFormat,
@@ -290,7 +290,7 @@ export class RenderPipeline {
                     },
                 }, { format: 'rgba8unorm' }];
 
-            this.transparentPipeline = this.device.createRenderPipeline({
+            this.transparentPipeline = await this.device.createRenderPipelineAsync({
                 label: 'ifc-transparent',
                 layout: pipelineLayout,
                 vertex: makeDesc(mod, '').vertex,
@@ -300,7 +300,7 @@ export class RenderPipeline {
                 multisample: { count: this.sampleCount },
             } as GPURenderPipelineDescriptor);
 
-            this.overlayPipeline = this.device.createRenderPipeline({
+            this.overlayPipeline = await this.device.createRenderPipelineAsync({
                 label: 'ifc-overlay',
                 layout: pipelineLayout,
                 vertex: makeDesc(mod, '').vertex,
@@ -311,45 +311,30 @@ export class RenderPipeline {
             } as GPURenderPipelineDescriptor);
         };
 
-        // Build all pipelines with main shader
-        buildAllPipelines(shaderModule);
+        // Try main shader first, fall back to FALLBACK_SHADER if it fails
+        const mainModule = this.device.createShaderModule({ code: shaderCode });
+        try {
+            await buildAllPipelines(mainModule);
+            console.log('[Pipeline] All pipelines OK (main shader)');
+        } catch (mainErr) {
+            const msg = mainErr instanceof Error ? mainErr.message : String(mainErr);
+            console.error('[Pipeline] Main shader failed:', msg.slice(0, 100));
+            this._pipelineError = 'rebuilding with fallback...';
 
-        // Check if main pipeline is valid — if not, rebuild ALL with fallback shader
-        this.device.pushErrorScope('validation');
-        // Force a validation check by trying to use the pipeline
-        void this.device.createRenderPipeline(makeDesc(shaderModule, 'ifc-validate'));
-        this.device.popErrorScope().then((error) => {
-            if (!error) {
-                console.log('[Pipeline] All pipelines OK');
-                return;
-            }
-            const msg = error.message || String(error);
-            console.error('[Pipeline] Shader failed:', msg.slice(0, 100));
-            this._pipelineError = `rebuilding with fallback...`;
-
-            // Rebuild ALL pipelines with the fallback shader
             console.log('[Pipeline] Rebuilding ALL pipelines with fallback shader...');
             const fbModule = this.device.createShaderModule({ code: FALLBACK_SHADER });
-
-            this.device.pushErrorScope('validation');
-            buildAllPipelines(fbModule);
-            this.device.popErrorScope().then((err2) => {
-                if (err2) {
-                    this._pipelineError = `BOTH: ${err2.message?.slice(0, 80)}`;
-                    console.error('[Pipeline] Fallback ALSO FAILED:', err2.message);
-                } else {
-                    this._pipelineError = 'using fallback shader';
-                    this._usingFallback = true;
-                    console.log('[Pipeline] All fallback pipelines OK');
-                }
-            });
-        });
-
-        // Bind group
-        this.bindGroup = this.device.createBindGroup({
-            layout: this.bindGroupLayout,
-            entries: [{ binding: 0, resource: { buffer: this.uniformBuffer } }],
-        });
+            try {
+                await buildAllPipelines(fbModule);
+                this._pipelineError = 'using fallback shader';
+                this._usingFallback = true;
+                console.log('[Pipeline] All fallback pipelines OK');
+            } catch (fbErr) {
+                const fbMsg = fbErr instanceof Error ? fbErr.message : String(fbErr);
+                this._pipelineError = `BOTH: ${fbMsg.slice(0, 80)}`;
+                console.error('[Pipeline] Fallback ALSO FAILED:', fbMsg);
+                throw fbErr;
+            }
+        }
     }
 
     getPipeline(): GPURenderPipeline { return this.pipeline; }

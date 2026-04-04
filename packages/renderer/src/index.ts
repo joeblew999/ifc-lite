@@ -172,6 +172,7 @@ export class Renderer {
         const isMobile = typeof navigator !== 'undefined' &&
             /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
         this.pipeline = new RenderPipeline(this.device, width, height, isMobile);
+        await this.pipeline.init();
         this.instancedPipeline = new InstancedRenderPipeline(this.device, width, height);
         this.picker = new Picker(this.device, width, height);
         this.sectionPlaneRenderer = new SectionPlaneRenderer(
