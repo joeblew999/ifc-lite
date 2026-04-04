@@ -245,16 +245,27 @@ export function useTouchControls(params: UseTouchControlsParams): void {
       touchState.multiTouch = false;
     };
 
-    canvas.addEventListener('touchstart', handleTouchStart);
-    canvas.addEventListener('touchmove', handleTouchMove);
-    canvas.addEventListener('touchend', handleTouchEnd);
+    // Use { passive: false } to ensure preventDefault() works on mobile
+    // Safari and Chrome mobile require this for smooth touch handling
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
     canvas.addEventListener('touchcancel', handleTouchCancel);
+
+    // Prevent iOS Safari pull-to-refresh and elastic bounce on the canvas
+    const preventOverscroll = (e: TouchEvent) => {
+      if (e.target === canvas) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('touchmove', preventOverscroll, { passive: false });
 
     return () => {
       canvas.removeEventListener('touchstart', handleTouchStart);
       canvas.removeEventListener('touchmove', handleTouchMove);
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchCancel);
+      document.removeEventListener('touchmove', preventOverscroll);
     };
   }, [isInitialized]);
 }
