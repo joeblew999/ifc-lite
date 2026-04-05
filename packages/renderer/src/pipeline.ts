@@ -321,7 +321,13 @@ export class RenderPipeline {
             console.error('[Pipeline] Main shader failed:', msg.slice(0, 100));
             this._pipelineError = 'rebuilding with fallback...';
 
-            console.log('[Pipeline] Rebuilding ALL pipelines with fallback shader...');
+            // Fallback shader has only 1 output — switch to single-target mode
+            this.singleTargetMode = true;
+            // Rebuild colorTargets for single output
+            colorTargets.length = 0;
+            colorTargets.push({ format: this.colorFormat });
+
+            console.log('[Pipeline] Rebuilding ALL pipelines with fallback shader (single-target)...');
             const fbModule = this.device.createShaderModule({ code: FALLBACK_SHADER });
             try {
                 await buildAllPipelines(fbModule);
