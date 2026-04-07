@@ -655,6 +655,7 @@ export function useIfcLoader() {
         const geometryProcessor = new GeometryProcessor({
           quality: GeometryQuality.Balanced,
           preferNative: true,
+          mergeLayers: getViewerStoreApi().getState().mergeWallLayers,
         });
 
         let estimatedTotal = 0;
@@ -1663,9 +1664,11 @@ export function useIfcLoader() {
         && file.size < HUGE_NATIVE_FILE_THRESHOLD;
 
       // Initialize geometry processor first (WASM init is fast if already loaded)
+      const { mergeWallLayers } = getViewerStoreApi().getState();
       const geometryProcessor = new GeometryProcessor({
         quality: GeometryQuality.Balanced,
         preferNative: false,
+        mergeLayers: mergeWallLayers,
       });
       await geometryProcessor.init();
 
