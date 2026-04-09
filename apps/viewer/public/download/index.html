@@ -570,7 +570,13 @@
       const ua = navigator.userAgent.toLowerCase();
       const isMac = ua.includes("mac");
       const isWindows = ua.includes("win");
-      const isAppleSilicon = /arm|apple/.test(ua);
+      // Detect Apple Silicon via userAgentData (Chromium 93+) or fall back to
+      // assuming ARM for modern Macs — the vast majority of active Macs are now
+      // M-series, and Safari does not expose architecture in the UA string.
+      const isAppleSilicon = isMac && (
+        navigator.userAgentData?.architecture === "arm" ||
+        !navigator.userAgentData  // Safari/Firefox don't expose userAgentData; default to ARM
+      );
       const primaryDownload = document.getElementById("primary-download");
 
       let href = downloads.macArm;
@@ -579,12 +585,12 @@
       if (isWindows) {
         href = downloads.winExe;
         label = "Download for Windows";
-      } else if (isMac && isAppleSilicon) {
-        href = downloads.macArm;
-        label = "Download for Apple Silicon";
-      } else if (isMac) {
+      } else if (isMac && !isAppleSilicon) {
         href = downloads.macIntel;
         label = "Download for Intel Mac";
+      } else if (isMac) {
+        href = downloads.macArm;
+        label = "Download for Apple Silicon";
       }
 
       primaryDownload.href = href;
