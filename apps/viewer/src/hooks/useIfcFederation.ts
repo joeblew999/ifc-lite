@@ -13,8 +13,17 @@
 import { useCallback } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore, type FederatedModel, type SchemaVersion } from '../store.js';
-import { detectFormat, parseFederatedIfcx, type IfcDataStore, type FederatedIfcxParseResult } from '@ifc-lite/parser';
-import type { MeshData } from '@ifc-lite/geometry';
+import {
+  detectFormat,
+  extractGeoreferencingOnDemand,
+  extractLengthUnitScale,
+  parseFederatedIfcx,
+  type IfcDataStore,
+  type FederatedIfcxParseResult,
+  type MapConversion,
+  type ProjectedCRS,
+} from '@ifc-lite/parser';
+import type { CoordinateInfo, MeshData } from '@ifc-lite/geometry';
 import { IfcQuery } from '@ifc-lite/query';
 import { buildSpatialIndexGuarded } from '../utils/loadingUtils.js';
 import { getDynamicBatchConfig } from '../utils/ifcConfig.js';
@@ -37,6 +46,239 @@ function toExactArrayBuffer(bytes: Uint8Array): ArrayBuffer {
     return bytes.buffer;
   }
   return bytes.slice().buffer;
+}
+
+type FederatedGeometryResult = NonNullable<FederatedModel['geometryResult']>;
+
+interface ModelGeoref {
+  mapConversion: MapConversion;
+  projectedCRS: ProjectedCRS;
+  lengthUnitScale: number;
+  coordinateInfo?: CoordinateInfo;
+}
+
+interface AffineTransform3D {
+  m00: number;
+  m01: number;
+  m02: number;
+  tx: number;
+  m10: number;
+  m11: number;
+  m12: number;
+  ty: number;
+  m20: number;
+  m21: number;
+  m22: number;
+  tz: number;
+}
+
+function getMapUnitScale(georef: ModelGeoref): number {
+  return georef.projectedCRS.mapUnitScale ?? georef.lengthUnitScale ?? 1;
+}
+
+function getAxis(conversion: MapConversion): { a: number; o: number; scale: number; denom: number } {
+  const a = conversion.xAxisAbscissa ?? 1;
+  const o = conversion.xAxisOrdinate ?? 0;
+  const scale = conversion.scale ?? 1;
+  const denom = Math.max(a * a + o * o, 1e-12);
+  return { a, o, scale, denom };
+}
+
+function extractModelGeoref(dataStore: IfcDataStore, coordinateInfo?: CoordinateInfo): ModelGeoref | null {
+  const georef = extractGeoreferencingOnDemand(dataStore);
+  if (!georef?.mapConversion || !georef.projectedCRS?.name) return null;
+  const lengthUnitScale = dataStore.source?.length && dataStore.entityIndex
+    ? extractLengthUnitScale(dataStore.source, dataStore.entityIndex)
+    : 1;
+  return {
+    mapConversion: georef.mapConversion,
+    projectedCRS: georef.projectedCRS,
+    lengthUnitScale,
+    coordinateInfo,
+  };
+}
+
+function crsKey(crs: ProjectedCRS): string {
+  return `${crs.name ?? ''}|${crs.geodeticDatum ?? ''}|${crs.mapProjection ?? ''}|${crs.mapZone ?? ''}`.toUpperCase();
+}
+
+function canAlignInSameProjectedCrs(a: ModelGeoref, b: ModelGeoref): boolean {
+  return crsKey(a.projectedCRS) === crsKey(b.projectedCRS);
+}
+
+function totalYupOffset(coordinateInfo?: CoordinateInfo): { x: number; y: number; z: number } {
+  const shift = coordinateInfo?.originShift ?? { x: 0, y: 0, z: 0 };
+  const rtc = coordinateInfo?.wasmRtcOffset;
+  const rtcYup = rtc ? { x: rtc.x, y: rtc.z, z: -rtc.y } : { x: 0, y: 0, z: 0 };
+  return {
+    x: shift.x + rtcYup.x,
+    y: shift.y + rtcYup.y,
+    z: shift.z + rtcYup.z,
+  };
+}
+
+function emptyBounds() {
+  return {
+    min: { x: Infinity, y: Infinity, z: Infinity },
+    max: { x: -Infinity, y: -Infinity, z: -Infinity },
+  };
+}
+
+function zeroBounds() {
+  return {
+    min: { x: 0, y: 0, z: 0 },
+    max: { x: 0, y: 0, z: 0 },
+  };
+}
+
+function updateBounds(bounds: ReturnType<typeof emptyBounds>, x: number, y: number, z: number): boolean {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return false;
+  bounds.min.x = Math.min(bounds.min.x, x);
+  bounds.min.y = Math.min(bounds.min.y, y);
+  bounds.min.z = Math.min(bounds.min.z, z);
+  bounds.max.x = Math.max(bounds.max.x, x);
+  bounds.max.y = Math.max(bounds.max.y, y);
+  bounds.max.z = Math.max(bounds.max.z, z);
+  return true;
+}
+
+function buildGeorefAlignmentTransform(source: ModelGeoref, reference: ModelGeoref): AffineTransform3D | null {
+  const sourceConv = source.mapConversion;
+  const refConv = reference.mapConversion;
+  const sourceAxis = getAxis(sourceConv);
+  const refAxis = getAxis(refConv);
+  const refDenom = refAxis.scale * refAxis.denom;
+  if (Math.abs(refDenom) < 1e-12) return null;
+
+  const sourceMapUnitScale = getMapUnitScale(source);
+  const refMapUnitScale = getMapUnitScale(reference);
+  const sourceOffset = totalYupOffset(source.coordinateInfo);
+  const refOffset = totalYupOffset(reference.coordinateInfo);
+
+  const eVx = sourceAxis.scale * sourceAxis.a;
+  const eVz = sourceAxis.scale * sourceAxis.o;
+  const eC = sourceConv.eastings * sourceMapUnitScale
+    + sourceAxis.scale * (sourceAxis.a * sourceOffset.x + sourceAxis.o * sourceOffset.z)
+    - refConv.eastings * refMapUnitScale;
+
+  const nVx = sourceAxis.scale * sourceAxis.o;
+  const nVz = -sourceAxis.scale * sourceAxis.a;
+  const nC = sourceConv.northings * sourceMapUnitScale
+    + sourceAxis.scale * (sourceAxis.o * sourceOffset.x - sourceAxis.a * sourceOffset.z)
+    - refConv.northings * refMapUnitScale;
+
+  const hC = sourceConv.orthogonalHeight * sourceMapUnitScale
+    + sourceOffset.y
+    - refConv.orthogonalHeight * refMapUnitScale;
+
+  const invRefDenom = 1 / refDenom;
+  const xVx = (refAxis.a * eVx + refAxis.o * nVx) * invRefDenom;
+  const xVz = (refAxis.a * eVz + refAxis.o * nVz) * invRefDenom;
+  const xC = (refAxis.a * eC + refAxis.o * nC) * invRefDenom - refOffset.x;
+
+  const yVx = (-refAxis.o * eVx + refAxis.a * nVx) * invRefDenom;
+  const yVz = (-refAxis.o * eVz + refAxis.a * nVz) * invRefDenom;
+  const yC = (-refAxis.o * eC + refAxis.a * nC) * invRefDenom;
+
+  return {
+    m00: xVx,
+    m01: 0,
+    m02: xVz,
+    tx: xC,
+    m10: 0,
+    m11: 1,
+    m12: 0,
+    ty: hC - refOffset.y,
+    m20: -yVx,
+    m21: 0,
+    m22: -yVz,
+    tz: -yC - refOffset.z,
+  };
+}
+
+function isIdentityTransform(transform: AffineTransform3D): boolean {
+  const eps = 1e-7;
+  return Math.abs(transform.m00 - 1) < eps
+    && Math.abs(transform.m01) < eps
+    && Math.abs(transform.m02) < eps
+    && Math.abs(transform.tx) < eps
+    && Math.abs(transform.m10) < eps
+    && Math.abs(transform.m11 - 1) < eps
+    && Math.abs(transform.m12) < eps
+    && Math.abs(transform.ty) < eps
+    && Math.abs(transform.m20) < eps
+    && Math.abs(transform.m21) < eps
+    && Math.abs(transform.m22 - 1) < eps
+    && Math.abs(transform.tz) < eps;
+}
+
+function applyAlignmentTransformAndUpdateBounds(
+  geometry: FederatedGeometryResult,
+  transform: AffineTransform3D,
+  referenceInfo?: CoordinateInfo,
+): void {
+  const bounds = emptyBounds();
+  let found = false;
+
+  for (const mesh of geometry.meshes) {
+    const positions = mesh.positions;
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const y = positions[i + 1];
+      const z = positions[i + 2];
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        continue;
+      }
+
+      const alignedX = transform.m00 * x + transform.m01 * y + transform.m02 * z + transform.tx;
+      const alignedY = transform.m10 * x + transform.m11 * y + transform.m12 * z + transform.ty;
+      const alignedZ = transform.m20 * x + transform.m21 * y + transform.m22 * z + transform.tz;
+      positions[i] = alignedX;
+      positions[i + 1] = alignedY;
+      positions[i + 2] = alignedZ;
+      found = updateBounds(bounds, alignedX, alignedY, alignedZ) || found;
+    }
+  }
+
+  geometry.coordinateInfo = {
+    originShift: referenceInfo?.originShift ?? { x: 0, y: 0, z: 0 },
+    originalBounds: found ? bounds : zeroBounds(),
+    shiftedBounds: found ? bounds : zeroBounds(),
+    hasLargeCoordinates: referenceInfo?.hasLargeCoordinates ?? false,
+    wasmRtcOffset: referenceInfo?.wasmRtcOffset,
+    buildingRotation: referenceInfo?.buildingRotation,
+  };
+}
+
+function alignGeometryToReferenceGeoref(
+  geometry: FederatedGeometryResult,
+  source: ModelGeoref,
+  reference: ModelGeoref,
+): boolean {
+  if (!canAlignInSameProjectedCrs(source, reference)) {
+    return false;
+  }
+
+  const transform = buildGeorefAlignmentTransform(source, reference);
+  if (!transform) {
+    return false;
+  }
+
+  if (!isIdentityTransform(transform)) {
+    applyAlignmentTransformAndUpdateBounds(geometry, transform, reference.coordinateInfo);
+  }
+  return true;
+}
+
+function findReferenceGeorefModel(): ModelGeoref | null {
+  const models = Array.from(useViewerStore.getState().models.values()) as FederatedModel[];
+  const sorted = [...models].sort((a, b) => (a.loadedAt ?? 0) - (b.loadedAt ?? 0));
+  for (const model of sorted) {
+    if (!model.ifcDataStore || !model.geometryResult) continue;
+    const georef = extractModelGeoref(model.ifcDataStore, model.geometryResult.coordinateInfo);
+    if (georef) return georef;
+  }
+  return null;
 }
 
 /**
@@ -218,6 +460,18 @@ export function useIfcFederation() {
 
       if (!parsedDataStore || !parsedGeometry) {
         throw new Error('Failed to parse file');
+      }
+
+      const referenceGeoref = findReferenceGeorefModel();
+      const parsedGeoref = extractModelGeoref(parsedDataStore, parsedGeometry.coordinateInfo);
+      if (referenceGeoref && parsedGeoref) {
+        setProgress({ phase: 'Aligning georeferenced model', percent: 90 });
+        const aligned = alignGeometryToReferenceGeoref(parsedGeometry, parsedGeoref, referenceGeoref);
+        if (!aligned) {
+          console.warn(
+            `[ifc-lite] Skipped georeferenced federation alignment for "${file.name}" because CRS differs from the reference model.`,
+          );
+        }
       }
 
       // =========================================================================

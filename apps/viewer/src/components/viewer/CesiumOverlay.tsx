@@ -197,10 +197,10 @@ function buildModelMatrix(
   const ty = -(so * mvx - sa * mvz);
   const tz = -mvy;
   const ifcToEnu = new Cesium.Matrix4(
-    sa, -so, 0, tx,
-    so,  sa, 0, ty,
-    0,   0,  1, tz,
-    0,   0,  0, 1,
+    sa, 0,  so, tx,
+    so, 0, -sa, ty,
+    0,  1,  0,  tz,
+    0,  0,  0,  1,
   );
   return Cesium.Matrix4.multiply(enuToEcef, ifcToEnu, new Cesium.Matrix4());
 }
