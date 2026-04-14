@@ -347,9 +347,15 @@ export function useIfcFederation() {
    */
   const addModel = useCallback(async (
     file: File | NativeFileHandle,
-    options?: { name?: string }
+    options?: {
+      name?: string;
+      modelId?: string;
+      loadedAt?: number;
+      visible?: boolean;
+      collapsed?: boolean;
+    }
   ): Promise<string | null> => {
-    const modelId = crypto.randomUUID();
+    const modelId = options?.modelId ?? crypto.randomUUID();
     const addStart = performance.now();
     try {
       // IMPORTANT: Before adding a new model, check if there's a legacy model
@@ -390,6 +396,7 @@ export function useIfcFederation() {
           schemaVersion: 'IFC4',
           loadedAt: Date.now() - 1000,
           fileSize: 0,
+          sourceFile: undefined,
           idOffset: legacyOffset,
           maxExpressId: legacyMaxExpressId,
         };
@@ -517,11 +524,12 @@ export function useIfcFederation() {
         name: options?.name ?? file.name,
         ifcDataStore: parsedDataStore,
         geometryResult: parsedGeometry,
-        visible: true,
-        collapsed: hasModels(), // Collapse if not first model
+        visible: options?.visible ?? true,
+        collapsed: options?.collapsed ?? hasModels(), // Collapse if not first model
         schemaVersion,
-        loadedAt: Date.now(),
+        loadedAt: options?.loadedAt ?? Date.now(),
         fileSize: buffer.byteLength,
+        sourceFile: file,
         idOffset,
         maxExpressId,
       };
