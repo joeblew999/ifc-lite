@@ -552,7 +552,14 @@ export function CesiumOverlay({
         let model: { modelMatrix: any; destroy?: () => void } | null = null;
         try {
           model = await Cesium.Model.fromGltfAsync({
-            url: glbUrl, modelMatrix, shadows: Cesium.ShadowMode.DISABLED,
+            url: glbUrl,
+            modelMatrix,
+            shadows: Cesium.ShadowMode.DISABLED,
+            // The generated GLB stores viewer-space vertices and buildModelMatrix
+            // already maps viewer axes into ENU. Avoid Cesium's default glTF
+            // Y-up/Z-forward correction or the model is rotated onto its side.
+            upAxis: Cesium.Axis.Z,
+            forwardAxis: Cesium.Axis.X,
           });
         } finally {
           URL.revokeObjectURL(glbUrl);
