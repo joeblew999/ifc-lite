@@ -16,6 +16,7 @@ import { useViewerStore } from '@/store';
 import type { CoordinateInfo, GeometryResult } from '@ifc-lite/geometry';
 import { EpsgLookupDialog, type EpsgResult } from './EpsgLookupDialog';
 import { LocationMap, type PickedPosition } from './LocationMap';
+import { mergeMapConversion, mergeProjectedCRS } from '@/lib/geo/effective-georef';
 
 // ── Field-specific assistance data ─────────────────────────────────────
 
@@ -343,38 +344,12 @@ export function GeoreferencingPanel({ georef, modelId, enableEditing, schemaVers
   const supportsStandardGeoreferencing = !schemaVersion?.toUpperCase().includes('2X3');
 
   const mergedCRS = useMemo((): ProjectedCRS | undefined => {
-    const base = georef?.projectedCRS;
-    const muts = mutations?.projectedCRS;
-    if (!base && !muts) return undefined;
-    return {
-      id: base?.id ?? 0,
-      name: muts?.name ?? base?.name ?? '',
-      description: muts?.description ?? base?.description,
-      geodeticDatum: muts?.geodeticDatum ?? base?.geodeticDatum,
-      verticalDatum: muts?.verticalDatum ?? base?.verticalDatum,
-      mapProjection: muts?.mapProjection ?? base?.mapProjection,
-      mapZone: muts?.mapZone ?? base?.mapZone,
-      mapUnit: muts?.mapUnit ?? base?.mapUnit,
-      mapUnitScale: base?.mapUnitScale,
-    };
-  }, [georef, mutations]);
+    return mergeProjectedCRS(georef?.projectedCRS, mutations?.projectedCRS, lengthUnitScale ?? 1);
+  }, [georef?.projectedCRS, mutations?.projectedCRS, lengthUnitScale]);
 
   const mergedConversion = useMemo((): MapConversion | undefined => {
-    const base = georef?.mapConversion;
-    const muts = mutations?.mapConversion;
-    if (!base && !muts) return undefined;
-    return {
-      id: base?.id ?? 0,
-      sourceCRS: base?.sourceCRS ?? 0,
-      targetCRS: base?.targetCRS ?? 0,
-      eastings: muts?.eastings ?? base?.eastings ?? 0,
-      northings: muts?.northings ?? base?.northings ?? 0,
-      orthogonalHeight: muts?.orthogonalHeight ?? base?.orthogonalHeight ?? 0,
-      xAxisAbscissa: muts?.xAxisAbscissa ?? base?.xAxisAbscissa,
-      xAxisOrdinate: muts?.xAxisOrdinate ?? base?.xAxisOrdinate,
-      scale: muts?.scale ?? base?.scale,
-    };
-  }, [georef, mutations]);
+    return mergeMapConversion(georef?.mapConversion, mutations?.mapConversion);
+  }, [georef?.mapConversion, mutations?.mapConversion]);
 
   const angleToGridNorth = useMemo(() => {
     return computeAngleToGridNorth(mergedConversion?.xAxisAbscissa, mergedConversion?.xAxisOrdinate);
@@ -405,19 +380,19 @@ export function GeoreferencingPanel({ georef, modelId, enableEditing, schemaVers
   const handleSave = useCallback((entity: 'projectedCRS' | 'mapConversion', field: string, value: string | number) => {
     if (!modelId || !setGeorefField) return;
     const oldValue = entity === 'projectedCRS'
-      ? georef?.projectedCRS?.[field as keyof ProjectedCRS]
-      : georef?.mapConversion?.[field as keyof MapConversion];
+      ? mergedCRS?.[field as keyof ProjectedCRS]
+      : mergedConversion?.[field as keyof MapConversion];
     setGeorefField(modelId, entity, field, value, oldValue as string | number | undefined);
-  }, [modelId, setGeorefField, georef]);
+  }, [modelId, setGeorefField, mergedCRS, mergedConversion]);
 
   // Handle angle edit: compute and set both XAxisAbscissa and XAxisOrdinate
   const handleAngleChange = useCallback((abscissa: number, ordinate: number) => {
     if (!modelId || !setGeorefFields) return;
     setGeorefFields(modelId, 'mapConversion', [
-      { field: 'xAxisAbscissa', value: abscissa, oldValue: georef?.mapConversion?.xAxisAbscissa },
-      { field: 'xAxisOrdinate', value: ordinate, oldValue: georef?.mapConversion?.xAxisOrdinate },
+      { field: 'xAxisAbscissa', value: abscissa, oldValue: mergedConversion?.xAxisAbscissa },
+      { field: 'xAxisOrdinate', value: ordinate, oldValue: mergedConversion?.xAxisOrdinate },
     ]);
-  }, [modelId, setGeorefFields, georef]);
+  }, [modelId, setGeorefFields, mergedConversion]);
 
   // Handle position picked from the map (reverse-projected easting/northing + optional terrain height)
   const handleApplyPosition = useCallback((position: PickedPosition) => {
@@ -440,30 +415,30 @@ export function GeoreferencingPanel({ georef, modelId, enableEditing, schemaVers
   const initializeMapConversionDefaults = useCallback(() => {
     if (!modelId || !setGeorefFields) return;
     setGeorefFields(modelId, 'mapConversion', [
-      { field: 'eastings', value: georef?.mapConversion?.eastings ?? 0, oldValue: georef?.mapConversion?.eastings },
-      { field: 'northings', value: georef?.mapConversion?.northings ?? 0, oldValue: georef?.mapConversion?.northings },
-      { field: 'orthogonalHeight', value: georef?.mapConversion?.orthogonalHeight ?? 0, oldValue: georef?.mapConversion?.orthogonalHeight },
-      { field: 'xAxisAbscissa', value: georef?.mapConversion?.xAxisAbscissa ?? 1, oldValue: georef?.mapConversion?.xAxisAbscissa },
-      { field: 'xAxisOrdinate', value: georef?.mapConversion?.xAxisOrdinate ?? 0, oldValue: georef?.mapConversion?.xAxisOrdinate },
-      { field: 'scale', value: georef?.mapConversion?.scale ?? 1, oldValue: georef?.mapConversion?.scale },
+      { field: 'eastings', value: mergedConversion?.eastings ?? 0, oldValue: mergedConversion?.eastings },
+      { field: 'northings', value: mergedConversion?.northings ?? 0, oldValue: mergedConversion?.northings },
+      { field: 'orthogonalHeight', value: mergedConversion?.orthogonalHeight ?? 0, oldValue: mergedConversion?.orthogonalHeight },
+      { field: 'xAxisAbscissa', value: mergedConversion?.xAxisAbscissa ?? 1, oldValue: mergedConversion?.xAxisAbscissa },
+      { field: 'xAxisOrdinate', value: mergedConversion?.xAxisOrdinate ?? 0, oldValue: mergedConversion?.xAxisOrdinate },
+      { field: 'scale', value: mergedConversion?.scale ?? 1, oldValue: mergedConversion?.scale },
     ]);
     setConversionOpen(true);
-  }, [modelId, setGeorefFields, georef]);
+  }, [modelId, setGeorefFields, mergedConversion]);
 
   const handleEpsgSelect = useCallback((result: EpsgResult) => {
     if (!modelId || !setGeorefFields) return;
     const epsgName = `EPSG:${result.code}`;
     const fieldUpdates: Array<{ field: string; value: string | number; oldValue?: string | number }> = [
-      { field: 'name', value: epsgName, oldValue: georef?.projectedCRS?.name },
+      { field: 'name', value: epsgName, oldValue: mergedCRS?.name },
     ];
     if (result.name) {
-      fieldUpdates.push({ field: 'description', value: result.name, oldValue: georef?.projectedCRS?.description });
+      fieldUpdates.push({ field: 'description', value: result.name, oldValue: mergedCRS?.description });
     }
     if (result.datum) {
-      fieldUpdates.push({ field: 'geodeticDatum', value: result.datum, oldValue: georef?.projectedCRS?.geodeticDatum });
+      fieldUpdates.push({ field: 'geodeticDatum', value: result.datum, oldValue: mergedCRS?.geodeticDatum });
     }
     if (result.projection) {
-      fieldUpdates.push({ field: 'mapProjection', value: result.projection, oldValue: georef?.projectedCRS?.mapProjection });
+      fieldUpdates.push({ field: 'mapProjection', value: result.projection, oldValue: mergedCRS?.mapProjection });
     }
     if (result.unit) {
       const unitUpper = result.unit.toUpperCase();
@@ -474,14 +449,14 @@ export function GeoreferencingPanel({ georef, modelId, enableEditing, schemaVers
           : unitUpper.includes('FOOT') || unitUpper.includes('FEET')
             ? 'FOOT'
             : result.unit;
-      fieldUpdates.push({ field: 'mapUnit', value: mapUnit, oldValue: georef?.projectedCRS?.mapUnit });
+      fieldUpdates.push({ field: 'mapUnit', value: mapUnit, oldValue: mergedCRS?.mapUnit });
     }
     setGeorefFields(modelId, 'projectedCRS', fieldUpdates);
-    if (!georef?.mapConversion && !mutations?.mapConversion) {
+    if (!mergedConversion && !mutations?.mapConversion) {
       initializeMapConversionDefaults();
     }
     setCrsOpen(true);
-  }, [modelId, setGeorefFields, georef, mutations, initializeMapConversionDefaults]);
+  }, [modelId, setGeorefFields, mergedCRS, mergedConversion, mutations, initializeMapConversionDefaults]);
 
   const hasData = mergedCRS || mergedConversion;
   const editable = enableEditing && !!modelId && supportsStandardGeoreferencing;

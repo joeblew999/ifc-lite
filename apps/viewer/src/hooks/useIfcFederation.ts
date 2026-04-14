@@ -15,8 +15,6 @@ import { useShallow } from 'zustand/react/shallow';
 import { useViewerStore, type FederatedModel, type SchemaVersion } from '../store.js';
 import {
   detectFormat,
-  extractGeoreferencingOnDemand,
-  extractLengthUnitScale,
   parseFederatedIfcx,
   type IfcDataStore,
   type FederatedIfcxParseResult,
@@ -36,6 +34,7 @@ import {
   parseStepBufferViewerModel,
 } from './ingest/viewerModelIngest.js';
 import { readNativeFile, type NativeFileHandle } from '../services/file-dialog.js';
+import { getEffectiveGeoreference, type GeorefMutationDataLike } from '../lib/geo/effective-georef.js';
 
 function isNativeFileHandle(file: File | NativeFileHandle): file is NativeFileHandle {
   return typeof (file as NativeFileHandle).path === 'string';
@@ -84,16 +83,17 @@ function getAxis(conversion: MapConversion): { a: number; o: number; scale: numb
   return { a, o, scale, denom };
 }
 
-function extractModelGeoref(dataStore: IfcDataStore, coordinateInfo?: CoordinateInfo): ModelGeoref | null {
-  const georef = extractGeoreferencingOnDemand(dataStore);
+function extractModelGeoref(
+  dataStore: IfcDataStore,
+  coordinateInfo?: CoordinateInfo,
+  mutations?: GeorefMutationDataLike,
+): ModelGeoref | null {
+  const georef = getEffectiveGeoreference(dataStore, coordinateInfo, mutations);
   if (!georef?.mapConversion || !georef.projectedCRS?.name) return null;
-  const lengthUnitScale = dataStore.source?.length && dataStore.entityIndex
-    ? extractLengthUnitScale(dataStore.source, dataStore.entityIndex)
-    : 1;
   return {
     mapConversion: georef.mapConversion,
     projectedCRS: georef.projectedCRS,
-    lengthUnitScale,
+    lengthUnitScale: georef.lengthUnitScale,
     coordinateInfo,
   };
 }
@@ -271,11 +271,16 @@ function alignGeometryToReferenceGeoref(
 }
 
 function findReferenceGeorefModel(): ModelGeoref | null {
-  const models = Array.from(useViewerStore.getState().models.values()) as FederatedModel[];
-  const sorted = [...models].sort((a, b) => (a.loadedAt ?? 0) - (b.loadedAt ?? 0));
-  for (const model of sorted) {
+  const state = useViewerStore.getState();
+  const modelEntries = Array.from(state.models.entries()) as Array<[string, FederatedModel]>;
+  const sorted = [...modelEntries].sort(([, a], [, b]) => (a.loadedAt ?? 0) - (b.loadedAt ?? 0));
+  for (const [modelId, model] of sorted) {
     if (!model.ifcDataStore || !model.geometryResult) continue;
-    const georef = extractModelGeoref(model.ifcDataStore, model.geometryResult.coordinateInfo);
+    const georef = extractModelGeoref(
+      model.ifcDataStore,
+      model.geometryResult.coordinateInfo,
+      state.georefMutations.get(modelId),
+    );
     if (georef) return georef;
   }
   return null;
