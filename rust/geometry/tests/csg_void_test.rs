@@ -310,6 +310,183 @@ fn non_rectangular_opening_does_not_over_cut_wall() {
     );
 }
 
+/// Build a long wall with `n` tessellated-box openings (each a rectangle
+/// polyline with a collinear midpoint on its long edges, so the opening
+/// mesh has extra non-corner vertices). Openings are spaced so they do
+/// not merge.
+fn long_wall_with_many_tessellated_openings(n: usize) -> String {
+    let mut s = String::new();
+    s.push_str(
+        r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');
+FILE_NAME('test.ifc','2024-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('1234567890123456789012',#2,'Test',$,$,$,$,(#10),#7);
+#2=IFCOWNERHISTORY(#3,#4,$,.ADDED.,$,$,$,0);
+#3=IFCPERSONANDORGANIZATION(#5,#6,$);
+#4=IFCAPPLICATION(#6,'1.0','Test','Test');
+#5=IFCPERSON($,'Test',$,$,$,$,$,$);
+#6=IFCORGANIZATION($,'Test',$,$,$);
+#7=IFCUNITASSIGNMENT((#8,#9));
+#8=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
+#9=IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.);
+#10=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-5,#11,$);
+#11=IFCAXIS2PLACEMENT3D(#12,$,$);
+#12=IFCCARTESIANPOINT((0.,0.,0.));
+#13=IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#10,$,.MODEL_VIEW.,$);
+#20=IFCLOCALPLACEMENT($,#21);
+#21=IFCAXIS2PLACEMENT3D(#22,#23,#24);
+#22=IFCCARTESIANPOINT((0.,0.,0.));
+#23=IFCDIRECTION((0.,0.,1.));
+#24=IFCDIRECTION((1.,0.,0.));
+#30=IFCRECTANGLEPROFILEDEF(.AREA.,'WallProfile',#31,100.0,0.3);
+#31=IFCAXIS2PLACEMENT2D(#32,#33);
+#32=IFCCARTESIANPOINT((0.,0.));
+#33=IFCDIRECTION((1.,0.));
+#40=IFCEXTRUDEDAREASOLID(#30,#41,#42,2.5);
+#41=IFCAXIS2PLACEMENT3D(#43,$,$);
+#42=IFCDIRECTION((0.,0.,1.));
+#43=IFCCARTESIANPOINT((0.,0.,0.));
+#50=IFCSHAPEREPRESENTATION(#13,'Body','SweptSolid',(#40));
+#51=IFCPRODUCTDEFINITIONSHAPE($,$,(#50));
+#100=IFCWALL('0001234567890123456789',#2,'TestWall',$,$,#20,#51,'Test',$);
+"#,
+    );
+
+    // Opening template: tessellated 1m × 1m × 0.6m box centred on wall
+    // thickness, with a midpoint on each long edge of the swept profile
+    // so the mesh has extra face-interior vertices.
+    let mut rel_voids = String::new();
+    for i in 0..n {
+        let base = 1000 + i as u32 * 20;
+        let pl = base;
+        let ap = base + 1;
+        let lr = base + 2;
+        let lp = base + 3;
+        let p_a = base + 4;
+        let p_b = base + 5;
+        let p_c = base + 6;
+        let p_d = base + 7;
+        let p_e = base + 8;
+        let p_f = base + 9;
+        let line = base + 10;
+        let prof = base + 11;
+        let solid = base + 12;
+        let sap = base + 13;
+        let sloc = base + 14;
+        let rep = base + 15;
+        let pds = base + 16;
+        let opening = base + 17;
+        let rel = base + 18;
+
+        // Openings start at x = -45 and step by 5 metres
+        let cx = -45.0 + (i as f64) * 5.0;
+        s.push_str(&format!(
+            "#{pl}=IFCLOCALPLACEMENT(#20,#{ap});\n\
+             #{ap}=IFCAXIS2PLACEMENT3D(#{lr},#{lp},#24);\n\
+             #{lr}=IFCCARTESIANPOINT(({cx},-0.5,1.0));\n\
+             #{lp}=IFCDIRECTION((0.,1.,0.));\n\
+             #{p_a}=IFCCARTESIANPOINT((-0.5,-1.0));\n\
+             #{p_b}=IFCCARTESIANPOINT((0.,-1.0));\n\
+             #{p_c}=IFCCARTESIANPOINT((0.5,-1.0));\n\
+             #{p_d}=IFCCARTESIANPOINT((0.5,1.0));\n\
+             #{p_e}=IFCCARTESIANPOINT((0.,1.0));\n\
+             #{p_f}=IFCCARTESIANPOINT((-0.5,1.0));\n\
+             #{line}=IFCPOLYLINE((#{p_a},#{p_b},#{p_c},#{p_d},#{p_e},#{p_f},#{p_a}));\n\
+             #{prof}=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,'Tess',#{line});\n\
+             #{solid}=IFCEXTRUDEDAREASOLID(#{prof},#{sap},#42,0.6);\n\
+             #{sap}=IFCAXIS2PLACEMENT3D(#{sloc},$,$);\n\
+             #{sloc}=IFCCARTESIANPOINT((0.,0.,0.));\n\
+             #{rep}=IFCSHAPEREPRESENTATION(#13,'Body','SweptSolid',(#{solid}));\n\
+             #{pds}=IFCPRODUCTDEFINITIONSHAPE($,$,(#{rep}));\n\
+             #{opening}=IFCOPENINGELEMENT('{guid:022}',#2,'Op{i}',$,$,#{pl},#{pds},$,.OPENING.);\n",
+            guid = i,
+        ));
+        rel_voids.push_str(&format!(
+            "#{rel}=IFCRELVOIDSELEMENT('{guid:021}V',#2,$,$,#100,#{opening});\n",
+            guid = i,
+        ));
+    }
+
+    s.push_str(&rel_voids);
+    s.push_str("ENDSEC;\nEND-ISO-10303-21;\n");
+    s
+}
+
+/// With many tessellated-box openings on one wall, every opening must
+/// be cut. If `mesh_fills_axis_aligned_box` rejected tessellated boxes,
+/// all of them would route to CSG and the `MAX_CSG_OPERATIONS = 10`
+/// cap inside `apply_void_context` would silently skip the 11th+
+/// openings — leaving uncut wall at their positions.
+#[test]
+fn many_tessellated_box_openings_are_all_cut() {
+    use ifc_lite_geometry::GeometryRouter;
+    use rustc_hash::FxHashMap;
+
+    const N: usize = 15;
+    let content = long_wall_with_many_tessellated_openings(N);
+    let mut decoder = EntityDecoder::new(&content);
+    let router = GeometryRouter::with_units(&content, &mut decoder);
+
+    let wall = decoder.decode_by_id(100).expect("decode wall");
+    let mut void_index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+    let opening_ids: Vec<u32> = (0..N).map(|i| 1000 + i as u32 * 20 + 17).collect();
+    void_index.insert(100, opening_ids);
+
+    let voided = router
+        .process_element_with_voids(&wall, &mut decoder, &void_index)
+        .expect("wall with voids");
+
+    // Each opening is at x = -45 + 5·i, y-range [-0.5, 0.1], z-range [0, 2],
+    // so the wall front face (y = -0.15) should have NO triangle whose
+    // centroid falls inside any opening's AABB footprint. Skipped CSG
+    // cuts would leave the original wall face intact, so at least one
+    // triangle centroid would land inside the skipped opening.
+    let centroid = |chunk: &[u32]| {
+        let p = |i: u32| {
+            let idx = i as usize * 3;
+            (
+                voided.positions[idx],
+                voided.positions[idx + 1],
+                voided.positions[idx + 2],
+            )
+        };
+        let (a, b, c) = (p(chunk[0]), p(chunk[1]), p(chunk[2]));
+        (
+            (a.0 + b.0 + c.0) / 3.0,
+            (a.1 + b.1 + c.1) / 3.0,
+            (a.2 + b.2 + c.2) / 3.0,
+        )
+    };
+
+    for i in 0..N {
+        let cx = -45.0 + (i as f64) * 5.0;
+        let mut covering_triangles = 0usize;
+        for tri in voided.indices.chunks_exact(3) {
+            let (cxt, cyt, czt) = centroid(tri);
+            // Shrink opening bounds slightly to avoid boundary
+            // triangles that are legitimately on the hole's edge.
+            let margin = 0.05_f32;
+            let x_in = (cxt as f64) > cx - 0.5 + margin as f64
+                && (cxt as f64) < cx + 0.5 - margin as f64;
+            let z_in = czt > 0.0 + margin && czt < 2.0 - margin;
+            let on_front = (cyt + 0.15).abs() < 0.02;
+            if on_front && x_in && z_in {
+                covering_triangles += 1;
+            }
+        }
+        assert_eq!(
+            covering_triangles, 0,
+            "opening #{i} (x centre {cx:.1}) has {covering_triangles} wall-front \
+             triangles inside its footprint — the cut was skipped (likely due to \
+             CSG budget exhaustion from misrouting tessellated boxes to CSG)."
+        );
+    }
+}
+
 /// Test mesh bounds calculation
 #[test]
 fn test_mesh_bounds() {

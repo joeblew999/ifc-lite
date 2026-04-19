@@ -49,34 +49,59 @@ fn rotate_and_normalize(
         .ok_or_else(|| Error::geometry("Zero-length direction vector".to_string()))
 }
 
-/// Whether every vertex of `mesh` sits on one of its AABB corners.
+/// Whether `mesh` is an axis-aligned box.
 ///
-/// Cheap discriminator between axis-aligned box openings (where every vertex
-/// has each coordinate at either the mesh min or max of that axis) and
-/// everything else — cylinders, arches, beveled frames, tilted boxes. AABB
-/// clipping over-cuts non-box openings because the corners of the bounding
-/// rectangle extend beyond the actual opening (e.g. a circular window leaves
-/// four triangular "corner" regions where the wall should not be cut).
+/// Checks that every triangle lies flat on one of the mesh's 6 AABB face
+/// planes: for each triangle there must be some axis on which all three
+/// vertices share the same min or max coordinate. Boxes pass by
+/// construction. Tessellated boxes (rectangle profiles modelled as
+/// polylines with collinear intermediate vertices, or subdivided faces)
+/// also pass because the extra vertices still sit on the face plane.
+/// Curved or tilted shapes — cylinders, arches, beveled frames, rotated
+/// boxes — have at least one triangle that spans the interior and fails.
 ///
-/// Only valid for meshes already expressed in the coordinate frame in which
-/// we will perform the AABB clip (world space in our callers). A tilted box
-/// in world has vertices between the AABB extremes on each axis and will be
-/// correctly rejected.
+/// Used to discriminate safe AABB-clip openings from shapes that would
+/// be over-cut by a rectangular AABB (e.g. a circular window leaves
+/// four triangular "corner" regions outside the actual opening).
+///
+/// Only valid for meshes already expressed in the coordinate frame in
+/// which the AABB clip will run (world space in our callers).
 fn mesh_fills_axis_aligned_box(mesh: &Mesh) -> bool {
-    if mesh.positions.is_empty() {
+    if mesh.positions.is_empty() || mesh.indices.len() < 3 {
         return false;
     }
     let (min, max) = mesh.bounds();
+    let extremes: [(usize, f32); 6] = [
+        (0, min.x),
+        (0, max.x),
+        (1, min.y),
+        (1, max.y),
+        (2, min.z),
+        (2, max.z),
+    ];
+    let n_positions = mesh.positions.len();
 
-    for chunk in mesh.positions.chunks_exact(3) {
-        let on_x_face =
-            (chunk[0] - min.x).abs() <= BOX_VERTEX_EPSILON || (chunk[0] - max.x).abs() <= BOX_VERTEX_EPSILON;
-        let on_y_face =
-            (chunk[1] - min.y).abs() <= BOX_VERTEX_EPSILON || (chunk[1] - max.y).abs() <= BOX_VERTEX_EPSILON;
-        let on_z_face =
-            (chunk[2] - min.z).abs() <= BOX_VERTEX_EPSILON || (chunk[2] - max.z).abs() <= BOX_VERTEX_EPSILON;
+    for tri in mesh.indices.chunks_exact(3) {
+        let (Some(i0), Some(i1), Some(i2)) = (
+            (tri[0] as usize).checked_mul(3),
+            (tri[1] as usize).checked_mul(3),
+            (tri[2] as usize).checked_mul(3),
+        ) else {
+            return false;
+        };
+        if i0 + 2 >= n_positions || i1 + 2 >= n_positions || i2 + 2 >= n_positions {
+            return false;
+        }
 
-        if !(on_x_face && on_y_face && on_z_face) {
+        // Triangle lies on some AABB face iff at least one axis has all
+        // three vertices at the same extreme coordinate.
+        let on_face = extremes.iter().any(|&(axis, target)| {
+            (mesh.positions[i0 + axis] - target).abs() <= BOX_VERTEX_EPSILON
+                && (mesh.positions[i1 + axis] - target).abs() <= BOX_VERTEX_EPSILON
+                && (mesh.positions[i2 + axis] - target).abs() <= BOX_VERTEX_EPSILON
+        });
+
+        if !on_face {
             return false;
         }
     }
