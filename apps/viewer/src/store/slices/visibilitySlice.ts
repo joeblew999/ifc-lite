@@ -11,7 +11,7 @@
 
 import type { StateCreator } from 'zustand';
 import type { TypeVisibility, EntityRef } from '../types.js';
-import { TYPE_VISIBILITY_DEFAULTS } from '../constants.js';
+import { TYPE_VISIBILITY_DEFAULTS, TYPE_VISIBILITY_STORAGE_KEYS } from '../constants.js';
 
 export interface VisibilitySlice {
   // State (legacy - single model)
@@ -194,12 +194,25 @@ export const createVisibilitySlice: StateCreator<VisibilitySlice, [], [], Visibi
     return true;
   },
 
-  toggleTypeVisibility: (type) => set((state) => ({
-    typeVisibility: {
-      ...state.typeVisibility,
-      [type]: !state.typeVisibility[type],
-    },
-  })),
+  toggleTypeVisibility: (type) => set((state) => {
+    const next = !state.typeVisibility[type];
+    const keyMap = {
+      spaces: TYPE_VISIBILITY_STORAGE_KEYS.SPACES,
+      openings: TYPE_VISIBILITY_STORAGE_KEYS.OPENINGS,
+      site: TYPE_VISIBILITY_STORAGE_KEYS.SITE,
+    } as const;
+    try {
+      localStorage.setItem(keyMap[type], String(next));
+    } catch {
+      // ignore (private mode / quota)
+    }
+    return {
+      typeVisibility: {
+        ...state.typeVisibility,
+        [type]: next,
+      },
+    };
+  }),
 
   // Actions (multi-model)
   hideEntityInModel: (modelId, expressId) => set((state) => {

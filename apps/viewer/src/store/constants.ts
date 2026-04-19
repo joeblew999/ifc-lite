@@ -124,13 +124,32 @@ export const UI_DEFAULTS = {
 // Type Visibility Defaults
 // ============================================================================
 
+/** localStorage keys for persisting type-visibility toggles across reloads. */
+export const TYPE_VISIBILITY_STORAGE_KEYS = {
+  SPACES: 'ifc-lite-show-spaces',
+  OPENINGS: 'ifc-lite-show-openings',
+  SITE: 'ifc-lite-show-site',
+} as const;
+
+function getInitialTypeVisibility(key: string, fallback: boolean): boolean {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+  } catch {
+    // ignore
+  }
+  return fallback;
+}
+
 export const TYPE_VISIBILITY_DEFAULTS = {
-  /** IfcSpace visibility - off by default */
-  SPACES: false,
-  /** IfcOpeningElement visibility - off by default */
-  OPENINGS: false,
-  /** IfcSite visibility - on by default (when has geometry) */
-  SITE: true,
+  /** IfcSpace visibility - off by default (persisted) */
+  SPACES: getInitialTypeVisibility(TYPE_VISIBILITY_STORAGE_KEYS.SPACES, false),
+  /** IfcOpeningElement visibility - off by default (persisted) */
+  OPENINGS: getInitialTypeVisibility(TYPE_VISIBILITY_STORAGE_KEYS.OPENINGS, false),
+  /** IfcSite visibility - on by default (persisted) */
+  SITE: getInitialTypeVisibility(TYPE_VISIBILITY_STORAGE_KEYS.SITE, true),
 } as const;
 
 // ============================================================================

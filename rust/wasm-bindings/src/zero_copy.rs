@@ -347,12 +347,24 @@ impl MeshCollection {
                 merged_indices.extend(child.indices.iter().map(|&i| i + vertex_offset));
             }
 
-            // Use parent wall's color, falling back to first child's color, then default
+            // Pick merged wall color with a "prefer opaque" policy so the
+            // wall doesn't inherit a glass/insulation layer's transparent
+            // alpha when the parent IfcWall carries no direct style.
+            //  1. Parent wall's own style (from IfcStyledItem chain).
+            //  2. First child layer with alpha >= 0.95 (opaque material).
+            //  3. default_wall_color (light gray) — better than rendering
+            //     the merged mass with an insulation/air-gap alpha.
+            const OPAQUE_ALPHA: f32 = 0.95;
             let color = parent_colors
                 .get(parent_id)
                 .copied()
-                .unwrap_or_else(|| self.meshes[child_indices[0]].color);
-            let _ = default_wall_color; // Available if neither parent nor child has color
+                .or_else(|| {
+                    child_indices
+                        .iter()
+                        .map(|&i| self.meshes[i].color)
+                        .find(|c| c[3] >= OPAQUE_ALPHA)
+                })
+                .unwrap_or(default_wall_color);
 
             merged_meshes.push(MeshDataJs {
                 express_id: *parent_id,
@@ -1200,5 +1212,96 @@ mod tests {
         let merged = collection.meshes.iter().find(|m| m.express_id == 100).unwrap();
         // First child: indices 0,1,2. Second child: indices 3,4,5 (offset by 3)
         assert_eq!(merged.indices, vec![0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_merge_wall_layers_prefers_opaque_child_over_transparent() {
+        // Regression: walls decomposed via IfcRelAggregates often have a
+        // transparent first child (vapour barrier / insulation alpha < 1).
+        // When the parent IfcWall carries no style, the merged mass must
+        // not inherit that transparent color — pick an opaque sibling
+        // instead, or fall back to the default wall color.
+        use rustc_hash::FxHashMap;
+
+        let mut wall_aggregate_index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+        wall_aggregate_index.insert(100, vec![101, 102]);
+
+        let mut child_to_wall_parent: FxHashMap<u32, u32> = FxHashMap::default();
+        child_to_wall_parent.insert(101, 100);
+        child_to_wall_parent.insert(102, 100);
+
+        // No parent style — forces the fallback path.
+        let parent_colors: FxHashMap<u32, [f32; 4]> = FxHashMap::default();
+
+        // First child is transparent (alpha 0.3 — glass/insulation-like).
+        let transparent_child = make_test_mesh(
+            101,
+            "IfcBuildingElementPart",
+            vec![0.0; 9],
+            [1.0, 0.0, 0.0, 0.3],
+        );
+        // Second child is opaque brick.
+        let opaque_child = make_test_mesh(
+            102,
+            "IfcBuildingElementPart",
+            vec![1.0; 9],
+            [0.6, 0.4, 0.2, 1.0],
+        );
+
+        let mut collection = MeshCollection::new();
+        collection.add(transparent_child);
+        collection.add(opaque_child);
+
+        collection.merge_wall_layers(
+            &wall_aggregate_index,
+            &child_to_wall_parent,
+            &parent_colors,
+            [0.85, 0.85, 0.85, 1.0],
+        );
+
+        let merged = collection.meshes.iter().find(|m| m.express_id == 100).unwrap();
+        // Must NOT be the transparent first child's color.
+        assert!(
+            merged.color[3] >= 0.95,
+            "merged wall inherited transparent alpha: {:?}",
+            merged.color
+        );
+        // Should be the opaque brick color.
+        assert_eq!(merged.color, [0.6, 0.4, 0.2, 1.0]);
+    }
+
+    #[test]
+    fn test_merge_wall_layers_all_transparent_falls_back_to_default() {
+        // When every layer is transparent (rare but possible on
+        // curtain-wall aggregates), use the default wall color rather
+        // than rendering the merged mass as glass.
+        use rustc_hash::FxHashMap;
+
+        let mut wall_aggregate_index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+        wall_aggregate_index.insert(100, vec![101, 102]);
+
+        let mut child_to_wall_parent: FxHashMap<u32, u32> = FxHashMap::default();
+        child_to_wall_parent.insert(101, 100);
+        child_to_wall_parent.insert(102, 100);
+
+        let parent_colors: FxHashMap<u32, [f32; 4]> = FxHashMap::default();
+
+        let c1 = make_test_mesh(101, "IfcBuildingElementPart", vec![0.0; 9], [1.0, 0.0, 0.0, 0.3]);
+        let c2 = make_test_mesh(102, "IfcBuildingElementPart", vec![1.0; 9], [0.0, 1.0, 0.0, 0.5]);
+
+        let mut collection = MeshCollection::new();
+        collection.add(c1);
+        collection.add(c2);
+
+        let default = [0.85, 0.85, 0.85, 1.0];
+        collection.merge_wall_layers(
+            &wall_aggregate_index,
+            &child_to_wall_parent,
+            &parent_colors,
+            default,
+        );
+
+        let merged = collection.meshes.iter().find(|m| m.express_id == 100).unwrap();
+        assert_eq!(merged.color, default);
     }
 }
