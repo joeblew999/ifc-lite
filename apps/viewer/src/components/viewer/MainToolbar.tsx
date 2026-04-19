@@ -1067,7 +1067,12 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
             checked={mergeWallLayers}
             onCheckedChange={(checked) => setMergeWallLayers(checked)}
           >
-            Merge Wall Layers
+            <div className="flex flex-col">
+              <span>Merge Wall Layers on Import</span>
+              <span className="text-xs text-muted-foreground">
+                Applies on next file load
+              </span>
+            </div>
           </DropdownMenuCheckboxItem>
         </DropdownMenuContent>
       </DropdownMenu>

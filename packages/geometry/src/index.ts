@@ -607,9 +607,12 @@ export class GeometryProcessor {
         throw new Error('WASM bridge not initialized');
       }
 
-      if (buffer.length >= GeometryProcessor.largeFileByteStreamingThreshold) {
+      if (!this.mergeLayers && buffer.length >= GeometryProcessor.largeFileByteStreamingThreshold) {
         yield* this.processStreamingBytes(buffer, batchConfig);
         return;
+      }
+      if (this.mergeLayers && buffer.length >= GeometryProcessor.largeFileByteStreamingThreshold) {
+        console.warn('[mergeLayers] large file (>256MB) routed through collector path instead of byte-streaming: merge-layers not yet wired through processStreamingBytes');
       }
 
       // Convert buffer to string (IFC files are text)
@@ -918,9 +921,16 @@ export class GeometryProcessor {
         && typeof navigator !== 'undefined'
         && (navigator.hardwareConcurrency ?? 1) > 1;
 
-      if (useParallel) {
+      // mergeLayers is not yet threaded through the parallel worker pool,
+      // so force the single-threaded streaming collector path when the
+      // toggle is on. Without this guard the toggle would be silently
+      // dropped for >2MB files on multi-core systems.
+      if (useParallel && !this.mergeLayers) {
         yield* this.processParallel(buffer, options.sharedRtcOffset);
       } else {
+        if (this.mergeLayers && useParallel) {
+          console.warn('[mergeLayers] forcing single-threaded streaming path (parallel workers do not yet honour mergeLayers)');
+        }
         yield* this.processStreaming(buffer, options.entityIndex, batchConfig, options.sharedRtcOffset);
       }
     }

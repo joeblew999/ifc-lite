@@ -318,6 +318,25 @@ impl MeshCollection {
                 // Single layer — nothing to merge
                 continue;
             }
+            // Subset-safety: only merge when *every* expected child for this
+            // parent is already present in the collection. When called from
+            // parseMeshesSubsetMergeLayers the job range may have sliced a
+            // wall's layers across workers; merging a partial set there
+            // would emit a truncated parent and leave orphan siblings in
+            // neighbouring batches. Defer those merges to whoever combines
+            // the subset results.
+            let expected_ids = match wall_aggregate_index.get(parent_id) {
+                Some(ids) => ids,
+                None => continue,
+            };
+            let all_present = expected_ids.iter().all(|expected| {
+                child_indices
+                    .iter()
+                    .any(|&idx| self.meshes[idx].express_id == *expected)
+            });
+            if !all_present {
+                continue;
+            }
 
             // Calculate total capacity needed
             let total_positions: usize = child_indices
@@ -1268,6 +1287,46 @@ mod tests {
         );
         // Should be the opaque brick color.
         assert_eq!(merged.color, [0.6, 0.4, 0.2, 1.0]);
+    }
+
+    #[test]
+    fn test_merge_wall_layers_skips_partial_subset() {
+        // Regression: subset parsing may slice a wall's child layers
+        // across worker ranges. merge_wall_layers must not merge a
+        // parent when only a subset of its expected children is in the
+        // local collection — that would emit a truncated parent and
+        // leave orphan siblings elsewhere.
+        use rustc_hash::FxHashMap;
+
+        let mut wall_aggregate_index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+        // Parent expects children 101, 102, 103 (three layers).
+        wall_aggregate_index.insert(100, vec![101, 102, 103]);
+
+        let mut child_to_wall_parent: FxHashMap<u32, u32> = FxHashMap::default();
+        child_to_wall_parent.insert(101, 100);
+        child_to_wall_parent.insert(102, 100);
+        child_to_wall_parent.insert(103, 100);
+
+        let parent_colors: FxHashMap<u32, [f32; 4]> = FxHashMap::default();
+
+        // Only two of three children in this subset.
+        let c1 = make_test_mesh(101, "IfcBuildingElementPart", vec![0.0; 9], [0.6, 0.4, 0.2, 1.0]);
+        let c2 = make_test_mesh(102, "IfcBuildingElementPart", vec![1.0; 9], [0.6, 0.4, 0.2, 1.0]);
+
+        let mut collection = MeshCollection::new();
+        collection.add(c1);
+        collection.add(c2);
+
+        let before = collection.len();
+        collection.merge_wall_layers(
+            &wall_aggregate_index,
+            &child_to_wall_parent,
+            &parent_colors,
+            [0.85, 0.85, 0.85, 1.0],
+        );
+        // No merge should have happened — collection is unchanged.
+        assert_eq!(collection.len(), before);
+        assert!(collection.meshes.iter().all(|m| m.express_id != 100));
     }
 
     #[test]

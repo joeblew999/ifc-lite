@@ -203,8 +203,8 @@ export const createVisibilitySlice: StateCreator<VisibilitySlice, [], [], Visibi
     } as const;
     try {
       localStorage.setItem(keyMap[type], String(next));
-    } catch {
-      // ignore (private mode / quota)
+    } catch (error) {
+      console.warn(`[visibility] Failed to persist type-visibility "${type}":`, error);
     }
     return {
       typeVisibility: {

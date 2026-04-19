@@ -128,8 +128,8 @@ export const createUISlice: StateCreator<UISlice, [], [], UISlice> = (set, get) 
   setMergeWallLayers: (mergeWallLayers) => {
     try {
       localStorage.setItem(MERGE_WALL_LAYERS_STORAGE_KEY, String(mergeWallLayers));
-    } catch {
-      // ignore (private mode / quota)
+    } catch (error) {
+      console.warn(`[ui] Failed to persist ${MERGE_WALL_LAYERS_STORAGE_KEY}=${mergeWallLayers}:`, error);
     }
     console.log(`[mergeLayers] setting changed → ${mergeWallLayers} (applies on next file load)`);
     set({ mergeWallLayers });

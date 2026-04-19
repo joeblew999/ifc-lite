@@ -1780,6 +1780,13 @@ impl IfcAPI {
                             if let Some(sub_meshes) = submesh_ok {
                                 let mat_colors = pre_pass.element_material_styles.get(&id);
                                 let mut mat_color_idx = 0usize;
+                                // Child layer sub-meshes must be deferred
+                                // too so merge_wall_layers sees them when
+                                // merge_layers is on; otherwise the user
+                                // would see both unmerged sub-meshes and
+                                // a later merged parent.
+                                let is_deferred_child =
+                                    merge_layers && pre_pass.child_to_wall_parent.contains_key(&id);
 
                                 for sub in sub_meshes.sub_meshes {
                                     let mut mesh = sub.mesh;
@@ -1809,7 +1816,11 @@ impl IfcAPI {
                                         mesh,
                                         color,
                                     );
-                                    batch_meshes.push(mesh_data);
+                                    if is_deferred_child {
+                                        deferred_layer_meshes.push(mesh_data);
+                                    } else {
+                                        batch_meshes.push(mesh_data);
+                                    }
                                 }
                                 processed += 1;
                             } else if let Ok(mut mesh) = router.process_element_with_voids(
@@ -1956,7 +1967,11 @@ impl IfcAPI {
                                         mesh,
                                         color,
                                     );
-                                    batch_meshes.push(mesh_data);
+                                    if is_deferred_child {
+                                        deferred_layer_meshes.push(mesh_data);
+                                    } else {
+                                        batch_meshes.push(mesh_data);
+                                    }
                                 }
                             } else if let Ok(mut mesh) = router.process_element_with_voids(
                                 &entity,
@@ -2118,15 +2133,19 @@ impl IfcAPI {
                         default_wall_color,
                     );
 
-                    // Emit merged meshes as a final batch
+                    // Emit merged meshes as a final batch.
+                    // NOTE: total_vertices / total_triangles were already
+                    // incremented when each child mesh was originally
+                    // produced and pushed into deferred_layer_meshes.
+                    // Merging just concatenates vertex/index buffers, so
+                    // the merged mesh carries the same aggregate counts —
+                    // don't add them again here (would double-count).
                     if let Some(ref callback) = on_batch {
                         let js_meshes = js_sys::Array::new();
                         let merged_count = merge_collection.len();
                         // Move meshes out of collection into JS array
                         for i in 0..merged_count {
                             if let Some(mesh) = merge_collection.get(i) {
-                                total_vertices += mesh.vertex_count();
-                                total_triangles += mesh.triangle_count();
                                 js_meshes.push(&mesh.into());
                             }
                         }

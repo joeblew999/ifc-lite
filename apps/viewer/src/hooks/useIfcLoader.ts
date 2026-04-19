@@ -115,10 +115,11 @@ function countNativeSpatialNodes(
   return total;
 }
 
-function computeNativeCacheKey(file: NativeFileHandle): string {
+function computeNativeCacheKey(file: NativeFileHandle, mergeLayers: boolean = false): string {
   const encodedPath = new TextEncoder().encode(file.path);
   const pathHash = computeFastFingerprint(toExactArrayBuffer(encodedPath));
-  return `native-ifc-${file.size}-${file.modifiedMs ?? 0}-${pathHash}-v1`;
+  const variant = mergeLayers ? 'merge' : 'split';
+  return `native-ifc-${file.size}-${file.modifiedMs ?? 0}-${pathHash}-v1-${variant}`;
 }
 
 function isNativeFileHandle(file: File | NativeFileHandle): file is NativeFileHandle {
@@ -638,7 +639,8 @@ export function useIfcLoader() {
         && file.size >= HUGE_NATIVE_FILE_THRESHOLD
       ) {
         const harnessRequest = getActiveHarnessRequest();
-        const nativeCacheKey = computeNativeCacheKey(file);
+        const nativeMergeLayersForCache = getViewerStoreApi().getState().mergeWallLayers;
+        const nativeCacheKey = computeNativeCacheKey(file, nativeMergeLayersForCache);
         const shouldUseNativeCache = file.size >= CACHE_SIZE_THRESHOLD;
         const hugeNativeMode = file.size >= HUGE_NATIVE_FILE_THRESHOLD;
         const retainAllMeshes = !hugeNativeMode;
@@ -652,12 +654,11 @@ export function useIfcLoader() {
         setIfcDataStore(null);
         setProgress({ phase: 'Starting native geometry streaming', percent: 10 });
 
-        const nativeMergeLayers = getViewerStoreApi().getState().mergeWallLayers;
-        console.log(`[mergeLayers] native load path: mergeWallLayers=${nativeMergeLayers} file=${fileName}`);
+        console.log(`[mergeLayers] native load path: mergeWallLayers=${nativeMergeLayersForCache} file=${fileName}`);
         const geometryProcessor = new GeometryProcessor({
           quality: GeometryQuality.Balanced,
           preferNative: true,
-          mergeLayers: nativeMergeLayers,
+          mergeLayers: nativeMergeLayersForCache,
         });
 
         let estimatedTotal = 0;
@@ -1615,12 +1616,16 @@ export function useIfcLoader() {
         }
       }
 
-      // Cache key uses filename + size + content fingerprint + format version
-      // Fingerprint prevents collisions for different files with the same name and size
+      // Cache key uses filename + size + content fingerprint + format version +
+      // merge-layers variant. The merge toggle produces a different mesh
+      // topology, so a user toggling the setting must not get stale
+      // opposite-variant geometry served from cache.
       const fingerprint = computeFastFingerprint(buffer);
+      const mergeWallLayersForImport = getViewerStoreApi().getState().mergeWallLayers;
+      const mergeVariantTag = mergeWallLayersForImport ? 'merge' : 'split';
       // Desktop Tauri cache commands only accept [A-Za-z0-9_-], so keep the
       // persisted key filename-safe and independent of the original filename.
-      const cacheKey = `ifc-${buffer.byteLength}-${fingerprint}-v4`;
+      const cacheKey = `ifc-${buffer.byteLength}-${fingerprint}-v4-${mergeVariantTag}`;
 
       if (buffer.byteLength >= CACHE_SIZE_THRESHOLD) {
         setProgress({ phase: 'Checking cache', percent: 5 });
@@ -1641,8 +1646,10 @@ export function useIfcLoader() {
       }
 
       // Try server parsing first (enabled by default for multi-core performance)
-      // Only for IFC4 STEP files (server doesn't support IFCX)
-      if (format === 'ifc' && USE_SERVER && SERVER_URL && SERVER_URL !== '') {
+      // Only for IFC4 STEP files (server doesn't support IFCX).
+      // Skip the server when merge-layers is active — the remote parser
+      // doesn't honour the toggle, so going local keeps the setting honest.
+      if (format === 'ifc' && !mergeWallLayersForImport && USE_SERVER && SERVER_URL && SERVER_URL !== '') {
         // Pass buffer directly - server uses File object for parsing, buffer is only for size checks
         const serverSuccess = await loadFromServer(file, buffer, () => loadSessionRef.current !== currentSession);
         if (serverSuccess) {
@@ -1666,12 +1673,11 @@ export function useIfcLoader() {
         && file.size < HUGE_NATIVE_FILE_THRESHOLD;
 
       // Initialize geometry processor first (WASM init is fast if already loaded)
-      const { mergeWallLayers } = getViewerStoreApi().getState();
-      console.log(`[mergeLayers] wasm load path: mergeWallLayers=${mergeWallLayers} file=${fileName}`);
+      console.log(`[mergeLayers] wasm load path: mergeWallLayers=${mergeWallLayersForImport} file=${fileName}`);
       const geometryProcessor = new GeometryProcessor({
         quality: GeometryQuality.Balanced,
         preferNative: false,
-        mergeLayers: mergeWallLayers,
+        mergeLayers: mergeWallLayersForImport,
       });
       await geometryProcessor.init();
 

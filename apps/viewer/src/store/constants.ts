@@ -84,7 +84,8 @@ function getInitialMergeWallLayers(): boolean {
   if (typeof window === 'undefined') return false;
   try {
     return localStorage.getItem(MERGE_WALL_LAYERS_STORAGE_KEY) === 'true';
-  } catch {
+  } catch (error) {
+    console.warn(`[store] Failed to read ${MERGE_WALL_LAYERS_STORAGE_KEY}:`, error);
     return false;
   }
 }
@@ -137,8 +138,8 @@ function getInitialTypeVisibility(key: string, fallback: boolean): boolean {
     const raw = localStorage.getItem(key);
     if (raw === 'true') return true;
     if (raw === 'false') return false;
-  } catch {
-    // ignore
+  } catch (error) {
+    console.warn(`[store] Failed to read type-visibility preference "${key}":`, error);
   }
   return fallback;
 }
