@@ -58,11 +58,24 @@ impl IfcAPI {
         let mut decoder = EntityDecoder::with_index(&content, entity_index);
 
         // Build style index: first map geometry IDs to colors, then map element IDs to colors
-        let geometry_styles = build_geometry_style_index(&content, &mut decoder);
+        let mut geometry_styles = build_geometry_style_index(&content, &mut decoder);
         let style_index = build_element_style_index(&content, &geometry_styles, &mut decoder);
         // Build material-based styles for sub-element color fallback (windows, doors)
         let element_material_styles =
             build_element_material_styles_from_content(&content, &mut decoder);
+
+        // Build material_id → color (merged into geometry_styles so per-layer
+        // slices resolve their colour through the normal geometry lookup path)
+        // plus the material-layer buildup index for single-solid slicing.
+        let material_color_index = super::styling::build_material_color_index_from_content(
+            &content, &mut decoder,
+        );
+        for (&mat_id, &color) in &material_color_index {
+            geometry_styles.entry(mat_id).or_insert(color);
+        }
+        let material_layer_index = std::sync::Arc::new(
+            ifc_lite_geometry::MaterialLayerIndex::from_content(&content, &mut decoder),
+        );
 
         // OPTIMIZATION: Collect all FacetedBrep IDs for batch processing
         // Also build void relationship index (host → openings)
@@ -103,6 +116,10 @@ impl IfcAPI {
         if needs_shift {
             router.set_rtc_offset(rtc_offset);
         }
+
+        // Attach the material-layer index so single-solid multi-layer walls /
+        // slabs get per-layer sub-meshes keyed by IfcMaterial id.
+        router.set_material_layer_index(std::sync::Arc::clone(&material_layer_index));
 
         // Batch preprocess FacetedBrep entities for maximum parallelism
         // This triangulates ALL faces from ALL BREPs in one parallel batch
@@ -237,22 +254,58 @@ impl IfcAPI {
                     };
 
                 if has_openings {
-                    match router.process_element_with_voids(&entity, &mut decoder, &void_index) {
-                        Err(e) => {
-                            web_sys::console::warn_1(
-                                &format!(
-                                    "[IFC-LITE] Failed to process #{} ({}): {}",
-                                    id,
-                                    entity.ifc_type.name(),
-                                    e
-                                )
-                                .into(),
+                    // Try per-sub-mesh voiding first so each layer (e.g. air /
+                    // insulation / brick) keeps its own direct IfcStyledItem
+                    // color while openings are still subtracted. Falls through
+                    // to the merged-mesh path on error or when every sub-mesh
+                    // is destroyed by CSG.
+                    let submesh_voids = router
+                        .process_element_with_submeshes_and_voids(
+                            &entity,
+                            &mut decoder,
+                            &void_index,
+                        )
+                        .ok()
+                        .filter(|c| !c.is_empty());
+
+                    if let Some(sub_meshes) = submesh_voids {
+                        let mat_colors = element_material_styles.get(&id);
+                        let mut mat_color_idx = 0usize;
+
+                        for sub in sub_meshes.sub_meshes {
+                            let mut mesh = sub.mesh;
+                            let color = resolve_submesh_color(
+                                sub.geometry_id,
+                                &geometry_styles,
+                                &mut decoder,
+                                mat_colors,
+                                &mut mat_color_idx,
+                                style_index.get(&id).copied(),
+                                default_color,
                             );
-                            stats.process_failed += 1;
-                        }
-                        Ok(mut mesh) => {
-                            let color = style_index.get(&id).copied().unwrap_or(default_color);
                             push_mesh_if_valid(&mut mesh, color);
+                        }
+                    } else {
+                        match router
+                            .process_element_with_voids(&entity, &mut decoder, &void_index)
+                        {
+                            Err(e) => {
+                                web_sys::console::warn_1(
+                                    &format!(
+                                        "[IFC-LITE] Failed to process #{} ({}): {}",
+                                        id,
+                                        entity.ifc_type.name(),
+                                        e
+                                    )
+                                    .into(),
+                                );
+                                stats.process_failed += 1;
+                            }
+                            Ok(mut mesh) => {
+                                let color =
+                                    style_index.get(&id).copied().unwrap_or(default_color);
+                                push_mesh_if_valid(&mut mesh, color);
+                            }
                         }
                     }
                 } else {
@@ -450,6 +503,10 @@ impl IfcAPI {
             decoder.clear_point_cache();
         }
 
+        // Attach material-layer index so sub-mesh routing can slice single-solid
+        // elements by their IfcMaterialLayerSetUsage buildup.
+        router.set_material_layer_index(std::sync::Arc::clone(&pre_pass.material_layer_index));
+
         // ── Phase 4: Process only the requested subset of geometry entities ──
         // Build a combined job list: simple first, then complex (same order as parseMeshesAsync)
         let all_jobs: Vec<(u32, usize, usize, ifc_lite_core::IfcType)> = pre_pass
@@ -501,7 +558,36 @@ impl IfcAPI {
                 };
 
                 if has_openings {
-                    if let Ok(mut mesh) = router.process_element_with_voids(
+                    // Per-sub-mesh void subtraction preserves layer colors;
+                    // fall back to merged void path if every sub-mesh is
+                    // destroyed (or the element produced no sub-meshes).
+                    let submesh_voids = router
+                        .process_element_with_submeshes_and_voids(
+                            &entity,
+                            &mut decoder,
+                            &pre_pass.void_index,
+                        )
+                        .ok()
+                        .filter(|c| !c.is_empty());
+
+                    if let Some(sub_meshes) = submesh_voids {
+                        let mat_colors = pre_pass.element_material_styles.get(&id);
+                        let mut mat_color_idx = 0usize;
+
+                        for sub in sub_meshes.sub_meshes {
+                            let mut mesh = sub.mesh;
+                            let color = resolve_submesh_color(
+                                sub.geometry_id,
+                                &pre_pass.geometry_styles,
+                                &mut decoder,
+                                mat_colors,
+                                &mut mat_color_idx,
+                                element_color,
+                                default_color,
+                            );
+                            push_mesh(&mut mesh, color);
+                        }
+                    } else if let Ok(mut mesh) = router.process_element_with_voids(
                         &entity,
                         &mut decoder,
                         &pre_pass.void_index,
@@ -1268,6 +1354,12 @@ impl IfcAPI {
                     router.set_rtc_offset(rtc_offset);
                 }
 
+                // Attach material-layer index so sub-mesh routing can slice
+                // single-solid multi-layer walls / slabs into per-layer slabs.
+                router.set_material_layer_index(std::sync::Arc::clone(
+                    &pre_pass.material_layer_index,
+                ));
+
                 // Surface RTC offset to JavaScript callers early so they can prepare camera/world state
                 if let Some(ref callback) = on_rtc_offset {
                     let rtc_info = js_sys::Object::new();
@@ -1339,8 +1431,67 @@ impl IfcAPI {
                         let has_representation =
                             entity.get(6).map(|a| !a.is_null()).unwrap_or(false);
                         if has_representation {
-                            // Use process_element_with_voids to subtract openings
-                            if let Ok(mut mesh) = router.process_element_with_voids(
+                            let has_openings = pre_pass.void_index.contains_key(&id);
+                            let default_color = get_default_color_for_type(&ifc_type);
+                            let element_color = element_styles.get(&id).copied();
+                            let ifc_type_name = type_name_cache
+                                .entry(ifc_type)
+                                .or_insert_with(|| ifc_type.name().to_string())
+                                .clone();
+
+                            // Prefer per-sub-mesh processing so multi-layer
+                            // walls keep per-item IfcStyledItem colors. Apply
+                            // void subtraction per sub-mesh when the element
+                            // has openings; otherwise use the plain sub-mesh
+                            // collector. Fall back to the merged mesh path if
+                            // neither produces any sub-meshes.
+                            let submesh_result = if has_openings {
+                                router.process_element_with_submeshes_and_voids(
+                                    &entity,
+                                    &mut decoder,
+                                    &pre_pass.void_index,
+                                )
+                            } else {
+                                router.process_element_with_submeshes(&entity, &mut decoder)
+                            };
+                            let submesh_ok = submesh_result.ok().filter(|c| !c.is_empty());
+
+                            if let Some(sub_meshes) = submesh_ok {
+                                let mat_colors = pre_pass.element_material_styles.get(&id);
+                                let mut mat_color_idx = 0usize;
+
+                                for sub in sub_meshes.sub_meshes {
+                                    let mut mesh = sub.mesh;
+                                    if mesh.is_empty() {
+                                        continue;
+                                    }
+                                    if mesh.normals.len() != mesh.positions.len() {
+                                        calculate_normals(&mut mesh);
+                                    }
+
+                                    let color = resolve_submesh_color(
+                                        sub.geometry_id,
+                                        &pre_pass.geometry_styles,
+                                        &mut decoder,
+                                        mat_colors,
+                                        &mut mat_color_idx,
+                                        element_color,
+                                        default_color,
+                                    );
+
+                                    total_vertices += mesh.positions.len() / 3;
+                                    total_triangles += mesh.indices.len() / 3;
+
+                                    let mesh_data = MeshDataJs::new(
+                                        id,
+                                        ifc_type_name.clone(),
+                                        mesh,
+                                        color,
+                                    );
+                                    batch_meshes.push(mesh_data);
+                                }
+                                processed += 1;
+                            } else if let Ok(mut mesh) = router.process_element_with_voids(
                                 &entity,
                                 &mut decoder,
                                 &pre_pass.void_index,
@@ -1350,18 +1501,10 @@ impl IfcAPI {
                                         calculate_normals(&mut mesh);
                                     }
 
-                                    // O(1) color lookup from pre-built element style map
-                                    let color = element_styles
-                                        .get(&id)
-                                        .copied()
-                                        .unwrap_or_else(|| get_default_color_for_type(&ifc_type));
+                                    let color = element_color.unwrap_or(default_color);
                                     total_vertices += mesh.positions.len() / 3;
                                     total_triangles += mesh.indices.len() / 3;
 
-                                    let ifc_type_name = type_name_cache
-                                        .entry(ifc_type)
-                                        .or_insert_with(|| ifc_type.name().to_string())
-                                        .clone();
                                     let mesh_data = MeshDataJs::new(id, ifc_type_name, mesh, color);
                                     batch_meshes.push(mesh_data);
                                     processed += 1;
@@ -1439,8 +1582,53 @@ impl IfcAPI {
                         let element_color = element_styles.get(&id).copied();
 
                         if has_openings {
-                            // Element has openings - use void subtraction (merged mesh)
-                            if let Ok(mut mesh) = router.process_element_with_voids(
+                            // Prefer per-sub-mesh void subtraction for correct
+                            // per-layer colors; fall back to merged mesh if
+                            // every sub-mesh is destroyed or unavailable.
+                            let submesh_voids = router
+                                .process_element_with_submeshes_and_voids(
+                                    &entity,
+                                    &mut decoder,
+                                    &pre_pass.void_index,
+                                )
+                                .ok()
+                                .filter(|c| !c.is_empty());
+
+                            if let Some(sub_meshes) = submesh_voids {
+                                let mat_colors = pre_pass.element_material_styles.get(&id);
+                                let mut mat_color_idx = 0usize;
+
+                                for sub in sub_meshes.sub_meshes {
+                                    let mut mesh = sub.mesh;
+                                    if mesh.is_empty() {
+                                        continue;
+                                    }
+                                    if mesh.normals.len() != mesh.positions.len() {
+                                        calculate_normals(&mut mesh);
+                                    }
+
+                                    let color = resolve_submesh_color(
+                                        sub.geometry_id,
+                                        &pre_pass.geometry_styles,
+                                        &mut decoder,
+                                        mat_colors,
+                                        &mut mat_color_idx,
+                                        element_color,
+                                        default_color,
+                                    );
+
+                                    total_vertices += mesh.positions.len() / 3;
+                                    total_triangles += mesh.indices.len() / 3;
+
+                                    let mesh_data = MeshDataJs::new(
+                                        id,
+                                        ifc_type_name.clone(),
+                                        mesh,
+                                        color,
+                                    );
+                                    batch_meshes.push(mesh_data);
+                                }
+                            } else if let Ok(mut mesh) = router.process_element_with_voids(
                                 &entity,
                                 &mut decoder,
                                 &pre_pass.void_index,

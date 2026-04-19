@@ -68,9 +68,11 @@
 //! - **Boolean operations**: ~20 entities/sec
 
 pub mod bool2d;
+mod bsp_csg;
 pub mod csg;
 pub mod error;
 pub mod extrusion;
+pub mod material_layer_index;
 pub mod mesh;
 pub mod processors;
 pub mod profile;
@@ -92,6 +94,7 @@ pub use bool2d::{
 pub use csg::{calculate_normals, ClippingProcessor, Plane, Triangle};
 pub use error::{Error, Result};
 pub use extrusion::{extrude_profile, extrude_profile_with_voids};
+pub use material_layer_index::{LayerAxis, LayerBuildup, LayerInfo, MaterialLayerIndex};
 pub use mesh::{CoordinateShift, Mesh, SubMesh, SubMeshCollection};
 pub use processors::{
     AdvancedBrepProcessor, BooleanClippingProcessor, ExtrudedAreaSolidProcessor,
