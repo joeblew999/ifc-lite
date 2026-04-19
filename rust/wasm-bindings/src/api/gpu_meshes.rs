@@ -467,6 +467,23 @@ impl IfcAPI {
             router.set_rtc_offset(rtc_offset);
         }
 
+        // Attach the material-layer index so single-solid multi-layer walls /
+        // slabs get per-layer sub-meshes keyed by IfcMaterial id. Without
+        // this, walls without IfcRelAggregates children fall back to
+        // resolve_submesh_color's window/door-style "alternate transparent"
+        // material picker, which incorrectly hands an insulation/vapour
+        // barrier's alpha to the first sub-mesh and makes the whole wall
+        // render as glass.
+        web_sys::console::log_1(
+            &format!(
+                "[mergeLayers] material_layer_index: {} elements indexed, {} sliceable",
+                pre_pass.material_layer_index.len(),
+                pre_pass.material_layer_index.sliceable_count()
+            )
+            .into(),
+        );
+        router.set_material_layer_index(std::sync::Arc::clone(&pre_pass.material_layer_index));
+
         // Batch preprocess FacetedBreps
         if !pre_pass.faceted_brep_ids.is_empty() {
             router.preprocess_faceted_breps(&pre_pass.faceted_brep_ids, &mut decoder);
@@ -543,7 +560,36 @@ impl IfcAPI {
                 };
 
                 if has_openings {
-                    if let Ok(mut mesh) = router.process_element_with_voids(
+                    // Match main's parse_meshes: try per-sub-mesh voids first
+                    // (fix from #541/#562 so multi-layer walls with windows
+                    // keep per-layer colors), fall back to merged-voids mesh
+                    // on failure or when CSG wipes every sub-mesh.
+                    let submesh_voids = router
+                        .process_element_with_submeshes_and_voids(
+                            &entity,
+                            &mut decoder,
+                            &pre_pass.void_index,
+                        )
+                        .ok()
+                        .filter(|c| !c.is_empty());
+
+                    if let Some(sub_meshes) = submesh_voids {
+                        let mat_colors = pre_pass.element_material_styles.get(&id);
+                        let mut mat_color_idx = 0usize;
+                        for sub in sub_meshes.sub_meshes {
+                            let mut mesh = sub.mesh;
+                            let color = resolve_submesh_color(
+                                sub.geometry_id,
+                                &pre_pass.geometry_styles,
+                                &mut decoder,
+                                mat_colors,
+                                &mut mat_color_idx,
+                                element_color,
+                                default_color,
+                            );
+                            push_mesh(&mut mesh, color);
+                        }
+                    } else if let Ok(mut mesh) = router.process_element_with_voids(
                         &entity,
                         &mut decoder,
                         &pre_pass.void_index,
