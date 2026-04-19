@@ -60,6 +60,7 @@ export class IfcLiteMeshCollector {
     this.ifcApi = ifcApi;
     this.content = content;
     this.mergeLayers = mergeLayers;
+    console.log(`[mergeLayers] IfcLiteMeshCollector constructed: mergeLayers=${mergeLayers} contentBytes=${content.length}`);
   }
 
   /**
@@ -107,6 +108,7 @@ export class IfcLiteMeshCollector {
    */
   collectMeshes(): MeshData[] {
     let collection: MeshCollection;
+    console.log(`[mergeLayers] collectMeshes (sync WASM): calling ${this.mergeLayers ? 'parseMeshesMergeLayers' : 'parseMeshes'}`);
     try {
       collection = this.mergeLayers
         ? this.ifcApi.parseMeshesMergeLayers(this.content)
@@ -209,6 +211,7 @@ export class IfcLiteMeshCollector {
 
     // Start async processing
     // NOTE: WASM now automatically defers style building for faster first frame
+    console.log(`[mergeLayers] parseMeshesAsync (streaming): mergeLayers=${this.mergeLayers} batchSize=${batchSize}`);
     const processingPromise = this.ifcApi.parseMeshesAsync(this.content, {
       batchSize,
       mergeLayers: this.mergeLayers,

@@ -77,6 +77,18 @@ function getInitialTheme(): 'light' | 'dark' | 'colorful' {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
+/** localStorage key for persisting the "Merge Wall Layers" toggle across reloads. */
+export const MERGE_WALL_LAYERS_STORAGE_KEY = 'ifc-lite-merge-wall-layers';
+
+function getInitialMergeWallLayers(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return localStorage.getItem(MERGE_WALL_LAYERS_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
 export const UI_DEFAULTS = {
   /** Default active tool */
   ACTIVE_TOOL: 'select',
@@ -104,8 +116,8 @@ export const UI_DEFAULTS = {
   SEPARATION_LINES_INTENSITY: 0.38,
   /** Separation-line radius in pixels */
   SEPARATION_LINES_RADIUS: 1.0,
-  /** Merge multilayer wall parts into single solids on import */
-  MERGE_WALL_LAYERS: false,
+  /** Merge multilayer wall parts into single solids on import (persisted in localStorage) */
+  MERGE_WALL_LAYERS: getInitialMergeWallLayers(),
 } as const;
 
 // ============================================================================

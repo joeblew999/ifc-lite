@@ -7,7 +7,7 @@
  */
 
 import type { StateCreator } from 'zustand';
-import { UI_DEFAULTS } from '../constants.js';
+import { UI_DEFAULTS, MERGE_WALL_LAYERS_STORAGE_KEY } from '../constants.js';
 import type { ContactShadingQuality, SeparationLinesQuality } from '@ifc-lite/renderer';
 
 export type ThemeMode = 'light' | 'dark' | 'colorful';
@@ -125,5 +125,13 @@ export const createUISlice: StateCreator<UISlice, [], [], UISlice> = (set, get) 
   setSeparationLinesQuality: (separationLinesQuality) => set({ separationLinesQuality }),
   setSeparationLinesIntensity: (separationLinesIntensity) => set({ separationLinesIntensity }),
   setSeparationLinesRadius: (separationLinesRadius) => set({ separationLinesRadius }),
-  setMergeWallLayers: (mergeWallLayers) => set({ mergeWallLayers }),
+  setMergeWallLayers: (mergeWallLayers) => {
+    try {
+      localStorage.setItem(MERGE_WALL_LAYERS_STORAGE_KEY, String(mergeWallLayers));
+    } catch {
+      // ignore (private mode / quota)
+    }
+    console.log(`[mergeLayers] setting changed → ${mergeWallLayers} (applies on next file load)`);
+    set({ mergeWallLayers });
+  },
 });

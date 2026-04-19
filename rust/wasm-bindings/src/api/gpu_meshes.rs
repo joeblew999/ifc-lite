@@ -419,10 +419,25 @@ impl IfcAPI {
         use ifc_lite_core::EntityDecoder;
         use ifc_lite_geometry::{calculate_normals, GeometryRouter};
 
+        web_sys::console::log_1(
+            &format!("[mergeLayers] parseMeshesMergeLayers: start ({} bytes)", content.len()).into(),
+        );
+
         // Use combined_pre_pass for aggregate relationship collection
         let entity_index = ifc_lite_core::build_entity_index(&content);
         let mut decoder = EntityDecoder::with_index(&content, entity_index);
         let pre_pass = combined_pre_pass(&content, &mut decoder);
+
+        let wall_agg_count = pre_pass.wall_aggregate_index.len();
+        let child_part_count: usize =
+            pre_pass.wall_aggregate_index.values().map(|v| v.len()).sum();
+        web_sys::console::log_1(
+            &format!(
+                "[mergeLayers] pre-pass: {} wall aggregates with {} IfcBuildingElementPart children",
+                wall_agg_count, child_part_count
+            )
+            .into(),
+        );
 
         let total_jobs = pre_pass.simple_jobs.len() + pre_pass.complex_jobs.len();
         decoder.reserve_cache(total_jobs * 2);
@@ -579,11 +594,22 @@ impl IfcAPI {
 
         // Post-process: merge multilayer wall children into parent walls
         let default_wall_color = get_default_color_for_type(&ifc_lite_core::IfcType::IfcWall);
+        let before_count = mesh_collection.length();
         mesh_collection.merge_wall_layers(
             &pre_pass.wall_aggregate_index,
             &pre_pass.child_to_wall_parent,
             &element_styles,
             default_wall_color,
+        );
+        let after_count = mesh_collection.length();
+        web_sys::console::log_1(
+            &format!(
+                "[mergeLayers] merge_wall_layers: {} meshes → {} meshes (Δ {})",
+                before_count,
+                after_count,
+                before_count as i64 - after_count as i64
+            )
+            .into(),
         );
 
         mesh_collection

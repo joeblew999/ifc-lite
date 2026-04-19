@@ -159,6 +159,7 @@ export class GeometryProcessor {
     this.coordinateHandler = new CoordinateHandler();
     this.isNative = options.preferNative !== false && isTauri();
     this.mergeLayers = options.mergeLayers ?? false;
+    console.log(`[mergeLayers] GeometryProcessor ctor: mergeLayers=${this.mergeLayers} native=${this.isNative}`);
     // Note: options accepted for API compatibility
     void options.quality;
 
@@ -617,6 +618,7 @@ export class GeometryProcessor {
 
       yield { type: 'model-open', modelID: 0 };
 
+      console.log(`[mergeLayers] processStreaming (WASM): mergeLayers=${this.mergeLayers} bufferBytes=${buffer.length}`);
       const collector = new IfcLiteMeshCollector(this.bridge.getApi(), content, this.mergeLayers);
       let totalMeshes = 0;
       let extractedBuildingRotation: number | undefined = undefined;
@@ -887,7 +889,8 @@ export class GeometryProcessor {
         // WASM PATH
         const decoder = new TextDecoder();
         const content = decoder.decode(buffer);
-        const collector = new IfcLiteMeshCollector(this.bridge!.getApi(), content);
+        console.log(`[mergeLayers] processAdaptive sync (<${sizeThreshold}B): mergeLayers=${this.mergeLayers}`);
+        const collector = new IfcLiteMeshCollector(this.bridge!.getApi(), content, this.mergeLayers);
         allMeshes = collector.collectMeshes();
       }
 

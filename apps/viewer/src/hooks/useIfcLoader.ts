@@ -652,10 +652,12 @@ export function useIfcLoader() {
         setIfcDataStore(null);
         setProgress({ phase: 'Starting native geometry streaming', percent: 10 });
 
+        const nativeMergeLayers = getViewerStoreApi().getState().mergeWallLayers;
+        console.log(`[mergeLayers] native load path: mergeWallLayers=${nativeMergeLayers} file=${fileName}`);
         const geometryProcessor = new GeometryProcessor({
           quality: GeometryQuality.Balanced,
           preferNative: true,
-          mergeLayers: getViewerStoreApi().getState().mergeWallLayers,
+          mergeLayers: nativeMergeLayers,
         });
 
         let estimatedTotal = 0;
@@ -1665,6 +1667,7 @@ export function useIfcLoader() {
 
       // Initialize geometry processor first (WASM init is fast if already loaded)
       const { mergeWallLayers } = getViewerStoreApi().getState();
+      console.log(`[mergeLayers] wasm load path: mergeWallLayers=${mergeWallLayers} file=${fileName}`);
       const geometryProcessor = new GeometryProcessor({
         quality: GeometryQuality.Balanced,
         preferNative: false,
