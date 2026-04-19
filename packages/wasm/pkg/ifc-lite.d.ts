@@ -219,12 +219,6 @@ export class IfcAPI {
    */
   parseMeshes(content: string): MeshCollection;
   /**
-   * Parse IFC file with multilayer wall merging enabled.
-   * Same as `parseMeshes` but merges child `IfcBuildingElementPart` layers
-   * of multilayer walls into a single solid mesh per wall.
-   */
-  parseMeshesMergeLayers(content: string): MeshCollection;
-  /**
    * Parse IFC file with streaming mesh batches for progressive rendering
    * Calls the callback with batches of meshes, yielding to browser between batches
    *
@@ -293,11 +287,6 @@ export class IfcAPI {
    */
   parseMeshesSubset(content: string, start_idx: number, end_idx: number, skip_expensive: boolean): MeshCollection;
   /**
-   * Parse a subset of IFC geometry entities with multilayer wall merging.
-   * Same as `parseMeshesSubset` but merges child wall layers into parent walls.
-   */
-  parseMeshesSubsetMergeLayers(content: string, start_idx: number, end_idx: number, skip_expensive: boolean): MeshCollection;
-  /**
    * Parse IFC file and return GPU-ready geometry for zero-copy upload
    *
    * This method generates geometry that is:
@@ -361,6 +350,21 @@ export class IfcAPI {
    */
   processGeometryBatch(data: Uint8Array, jobs_flat: Uint32Array, unit_scale: number, rtc_x: number, rtc_y: number, rtc_z: number, needs_shift: boolean, void_keys: Uint32Array, void_counts: Uint32Array, void_values: Uint32Array, style_ids: Uint32Array, style_colors: Uint8Array): MeshCollection;
   /**
+   * Parse IFC file with multilayer wall merging enabled.
+   *
+   * Same as `parseMeshes` but merges child `IfcBuildingElementPart` layers
+   * of multilayer walls into a single solid mesh per wall. This reduces
+   * draw calls and memory usage for large models with multilayer walls.
+   *
+   * Example:
+   * ```javascript
+   * const api = new IfcAPI();
+   * const collection = api.parseMeshesMergeLayers(ifcData);
+   * // Multilayer walls now produce 1 mesh instead of N meshes per layer
+   * ```
+   */
+  parseMeshesMergeLayers(content: string): MeshCollection;
+  /**
    * Parse IFC file with streaming GPU-ready geometry batches
    *
    * Yields batches of GPU-ready geometry for progressive rendering with zero-copy upload.
@@ -423,6 +427,11 @@ export class IfcAPI {
    * Returns a collection of instanced geometries with pointer access.
    */
   parseToGpuInstancedGeometry(content: string): GpuInstancedGeometryCollection;
+  /**
+   * Parse a subset of IFC geometry entities with multilayer wall merging.
+   * Same as `parseMeshesSubset` but merges child wall layers into parent walls.
+   */
+  parseMeshesSubsetMergeLayers(content: string, start_idx: number, end_idx: number, skip_expensive: boolean): MeshCollection;
   /**
    * Process instanced geometry for a subset of pre-scanned entities.
    * Takes raw bytes and pre-pass data from buildPrePassOnce.
@@ -1085,7 +1094,9 @@ export interface InitOutput {
   readonly ifcapi_parseMeshesAsync: (a: number, b: number, c: number, d: number) => number;
   readonly ifcapi_parseMeshesInstanced: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseMeshesInstancedAsync: (a: number, b: number, c: number, d: number) => number;
+  readonly ifcapi_parseMeshesMergeLayers: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseMeshesSubset: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
+  readonly ifcapi_parseMeshesSubsetMergeLayers: (a: number, b: number, c: number, d: number, e: number, f: number) => number;
   readonly ifcapi_parseMeshesWithRtc: (a: number, b: number, c: number) => number;
   readonly ifcapi_parseStreaming: (a: number, b: number, c: number, d: number) => number;
   readonly ifcapi_parseSymbolicRepresentations: (a: number, b: number, c: number) => number;
@@ -1205,9 +1216,9 @@ export interface InitOutput {
   readonly profileentryjs_expressId: (a: number) => number;
   readonly symboliccircle_expressId: (a: number) => number;
   readonly __wbg_gpuinstancedgeometryref_free: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_1144: (a: number, b: number, c: number) => void;
-  readonly __wasm_bindgen_func_elem_1143: (a: number, b: number) => void;
-  readonly __wasm_bindgen_func_elem_1184: (a: number, b: number, c: number, d: number) => void;
+  readonly __wasm_bindgen_func_elem_1156: (a: number, b: number, c: number) => void;
+  readonly __wasm_bindgen_func_elem_1155: (a: number, b: number) => void;
+  readonly __wasm_bindgen_func_elem_1196: (a: number, b: number, c: number, d: number) => void;
   readonly __wbindgen_export: (a: number) => void;
   readonly __wbindgen_export2: (a: number, b: number, c: number) => void;
   readonly __wbindgen_export3: (a: number, b: number) => number;

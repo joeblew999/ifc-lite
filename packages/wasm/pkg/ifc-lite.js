@@ -212,12 +212,12 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-function __wasm_bindgen_func_elem_1144(arg0, arg1, arg2) {
-    wasm.__wasm_bindgen_func_elem_1144(arg0, arg1, addHeapObject(arg2));
+function __wasm_bindgen_func_elem_1156(arg0, arg1, arg2) {
+    wasm.__wasm_bindgen_func_elem_1156(arg0, arg1, addHeapObject(arg2));
 }
 
-function __wasm_bindgen_func_elem_1184(arg0, arg1, arg2, arg3) {
-    wasm.__wasm_bindgen_func_elem_1184(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
+function __wasm_bindgen_func_elem_1196(arg0, arg1, arg2, arg3) {
+    wasm.__wasm_bindgen_func_elem_1196(arg0, arg1, addHeapObject(arg2), addHeapObject(arg3));
 }
 
 const GeoReferenceJsFinalization = (typeof FinalizationRegistry === 'undefined')
@@ -1322,6 +1322,28 @@ export class IfcAPI {
         return MeshCollection.__wrap(ret);
     }
     /**
+     * Parse IFC file with multilayer wall merging enabled.
+     *
+     * Same as `parseMeshes` but merges child `IfcBuildingElementPart` layers
+     * of multilayer walls into a single solid mesh per wall. This reduces
+     * draw calls and memory usage for large models with multilayer walls.
+     *
+     * Example:
+     * ```javascript
+     * const api = new IfcAPI();
+     * const collection = api.parseMeshesMergeLayers(ifcData);
+     * // Multilayer walls now produce 1 mesh instead of N meshes per layer
+     * ```
+     * @param {string} content
+     * @returns {MeshCollection}
+     */
+    parseMeshesMergeLayers(content) {
+        const ptr0 = passStringToWasm0(content, wasm.__wbindgen_export3, wasm.__wbindgen_export4);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.ifcapi_parseMeshesMergeLayers(this.__wbg_ptr, ptr0, len0);
+        return MeshCollection.__wrap(ret);
+    }
+    /**
      * Parse IFC file with streaming GPU-ready geometry batches
      *
      * Yields batches of GPU-ready geometry for progressive rendering with zero-copy upload.
@@ -1406,6 +1428,21 @@ export class IfcAPI {
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.ifcapi_parseToGpuInstancedGeometry(this.__wbg_ptr, ptr0, len0);
         return GpuInstancedGeometryCollection.__wrap(ret);
+    }
+    /**
+     * Parse a subset of IFC geometry entities with multilayer wall merging.
+     * Same as `parseMeshesSubset` but merges child wall layers into parent walls.
+     * @param {string} content
+     * @param {number} start_idx
+     * @param {number} end_idx
+     * @param {boolean} skip_expensive
+     * @returns {MeshCollection}
+     */
+    parseMeshesSubsetMergeLayers(content, start_idx, end_idx, skip_expensive) {
+        const ptr0 = passStringToWasm0(content, wasm.__wbindgen_export3, wasm.__wbindgen_export4);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.ifcapi_parseMeshesSubsetMergeLayers(this.__wbg_ptr, ptr0, len0, start_idx, end_idx, skip_expensive);
+        return MeshCollection.__wrap(ret);
     }
     /**
      * Process instanced geometry for a subset of pre-scanned entities.
@@ -3000,6 +3037,11 @@ function __wbg_get_imports() {
         const ret = Error(getStringFromWasm0(arg0, arg1));
         return addHeapObject(ret);
     };
+    imports.wbg.__wbg___wbindgen_boolean_get_dea25b33882b895b = function(arg0) {
+        const v = getObject(arg0);
+        const ret = typeof(v) === 'boolean' ? v : undefined;
+        return isLikeNone(ret) ? 0xFFFFFF : ret ? 1 : 0;
+    };
     imports.wbg.__wbg___wbindgen_is_function_8d400b8b1af978cd = function(arg0) {
         const ret = typeof(getObject(arg0)) === 'function';
         return ret;
@@ -3070,6 +3112,9 @@ function __wbg_get_imports() {
         const ret = getObject(arg0).length;
         return ret;
     };
+    imports.wbg.__wbg_log_1d990106d99dacb7 = function(arg0) {
+        console.log(getObject(arg0));
+    };
     imports.wbg.__wbg_meshdatajs_new = function(arg0) {
         const ret = MeshDataJs.__wrap(arg0);
         return addHeapObject(ret);
@@ -3093,7 +3138,7 @@ function __wbg_get_imports() {
                 const a = state0.a;
                 state0.a = 0;
                 try {
-                    return __wasm_bindgen_func_elem_1184(a, state0.b, arg0, arg1);
+                    return __wasm_bindgen_func_elem_1196(a, state0.b, arg0, arg1);
                 } finally {
                     state0.a = a;
                 }
@@ -3200,14 +3245,14 @@ function __wbg_get_imports() {
         const ret = getStringFromWasm0(arg0, arg1);
         return addHeapObject(ret);
     };
+    imports.wbg.__wbindgen_cast_45cc0390cbb4189c = function(arg0, arg1) {
+        // Cast intrinsic for `Closure(Closure { dtor_idx: 152, function: Function { arguments: [Externref], shim_idx: 153, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
+        const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_1155, __wasm_bindgen_func_elem_1156);
+        return addHeapObject(ret);
+    };
     imports.wbg.__wbindgen_cast_4625c577ab2ec9ee = function(arg0) {
         // Cast intrinsic for `U64 -> Externref`.
         const ret = BigInt.asUintN(64, arg0);
-        return addHeapObject(ret);
-    };
-    imports.wbg.__wbindgen_cast_782a03ac5d769879 = function(arg0, arg1) {
-        // Cast intrinsic for `Closure(Closure { dtor_idx: 151, function: Function { arguments: [Externref], shim_idx: 152, ret: Unit, inner_ret: Some(Unit) }, mutable: true }) -> Externref`.
-        const ret = makeMutClosure(arg0, arg1, wasm.__wasm_bindgen_func_elem_1143, __wasm_bindgen_func_elem_1144);
         return addHeapObject(ret);
     };
     imports.wbg.__wbindgen_cast_d6cd19b81560fd6e = function(arg0) {
