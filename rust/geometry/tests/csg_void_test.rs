@@ -182,6 +182,134 @@ fn test_mesh_merge() {
     );
 }
 
+/// Wall (4m × 0.3m × 2.5m) with an IfcOpeningElement whose SweptArea is a
+/// trapezoid (5 corners). Vertex count is well under 100, which used to
+/// trip `classify_openings` into picking the rectangular AABB path and
+/// cutting a cuboid hole instead of the actual trapezoid — producing
+/// visibly oversized voids ("cutting voids sometimes misses the right
+/// shape", issue #547).
+fn wall_with_trapezoid_opening_ifc() -> String {
+    // Trapezoid polyline points: narrow top, wide bottom.
+    //   (-0.5,-1.0) → ( 0.5,-1.0) → ( 0.3, 1.0) → (-0.3, 1.0) → close.
+    // Extruded 0.3 m along +Z (opening's local Z), placed inside the wall
+    // so the opening bridges it. The opening's world placement rotates
+    // its local Z to world Y so the opening cuts through the wall's Y
+    // thickness.
+    r#"ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');
+FILE_NAME('test.ifc','2024-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('IFC4'));
+ENDSEC;
+DATA;
+#1=IFCPROJECT('1234567890123456789012',#2,'Test',$,$,$,$,(#10),#7);
+#2=IFCOWNERHISTORY(#3,#4,$,.ADDED.,$,$,$,0);
+#3=IFCPERSONANDORGANIZATION(#5,#6,$);
+#4=IFCAPPLICATION(#6,'1.0','Test','Test');
+#5=IFCPERSON($,'Test',$,$,$,$,$,$);
+#6=IFCORGANIZATION($,'Test',$,$,$);
+#7=IFCUNITASSIGNMENT((#8,#9));
+#8=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
+#9=IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.);
+#10=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-5,#11,$);
+#11=IFCAXIS2PLACEMENT3D(#12,$,$);
+#12=IFCCARTESIANPOINT((0.,0.,0.));
+#13=IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#10,$,.MODEL_VIEW.,$);
+#20=IFCLOCALPLACEMENT($,#21);
+#21=IFCAXIS2PLACEMENT3D(#22,#23,#24);
+#22=IFCCARTESIANPOINT((0.,0.,0.));
+#23=IFCDIRECTION((0.,0.,1.));
+#24=IFCDIRECTION((1.,0.,0.));
+#30=IFCRECTANGLEPROFILEDEF(.AREA.,'WallProfile',#31,4.0,0.3);
+#31=IFCAXIS2PLACEMENT2D(#32,#33);
+#32=IFCCARTESIANPOINT((0.,0.));
+#33=IFCDIRECTION((1.,0.));
+#40=IFCEXTRUDEDAREASOLID(#30,#41,#42,2.5);
+#41=IFCAXIS2PLACEMENT3D(#43,$,$);
+#42=IFCDIRECTION((0.,0.,1.));
+#43=IFCCARTESIANPOINT((0.,0.,0.));
+#50=IFCSHAPEREPRESENTATION(#13,'Body','SweptSolid',(#40));
+#51=IFCPRODUCTDEFINITIONSHAPE($,$,(#50));
+#100=IFCWALL('0001234567890123456789',#2,'TestWall',$,$,#20,#51,'Test',$);
+#110=IFCLOCALPLACEMENT(#20,#111);
+#111=IFCAXIS2PLACEMENT3D(#112,#113,#114);
+#112=IFCCARTESIANPOINT((0.,-0.5,1.0));
+#113=IFCDIRECTION((0.,1.,0.));
+#114=IFCDIRECTION((1.,0.,0.));
+#120=IFCCARTESIANPOINT((-0.5,-1.0));
+#121=IFCCARTESIANPOINT((0.5,-1.0));
+#122=IFCCARTESIANPOINT((0.3,1.0));
+#123=IFCCARTESIANPOINT((-0.3,1.0));
+#124=IFCPOLYLINE((#120,#121,#122,#123,#120));
+#125=IFCARBITRARYCLOSEDPROFILEDEF(.AREA.,'TrapezoidOpening',#124);
+#130=IFCEXTRUDEDAREASOLID(#125,#131,#132,0.6);
+#131=IFCAXIS2PLACEMENT3D(#133,$,$);
+#132=IFCDIRECTION((0.,0.,1.));
+#133=IFCCARTESIANPOINT((0.,0.,0.));
+#140=IFCSHAPEREPRESENTATION(#13,'Body','SweptSolid',(#130));
+#141=IFCPRODUCTDEFINITIONSHAPE($,$,(#140));
+#200=IFCOPENINGELEMENT('0001234567890123456790',#2,'TestOpening',$,$,#110,#141,$,.OPENING.);
+#300=IFCRELVOIDSELEMENT('0001234567890123456791',#2,$,$,#100,#200);
+ENDSEC;
+END-ISO-10303-21;
+"#
+    .to_string()
+}
+
+/// Regression test for issue #547: a low-tessellation non-rectangular
+/// opening (trapezoid extrusion) used to be classified as rectangular
+/// purely because its vertex count fell below the 100-vertex threshold.
+/// The AABB cut removed the trapezoid's entire bounding rectangle from
+/// the wall, so the voided wall was missing material outside the actual
+/// trapezoid — visible as oversized voids around windows/doors.
+///
+/// The opening's trapezoid (after placement) spans world
+///   x ∈ [-0.5, 0.5] at z = 2.0 (wide top)
+///   x ∈ [-0.3, 0.3] at z = 0.0 (narrow bottom)
+/// so at z ≈ 0.3 the actual opening only reaches |x| ≲ 0.33 but the
+/// AABB cut would have cleared material all the way to |x| = 0.5.
+#[test]
+fn non_rectangular_opening_does_not_over_cut_wall() {
+    use ifc_lite_geometry::GeometryRouter;
+    use rustc_hash::FxHashMap;
+
+    let content = wall_with_trapezoid_opening_ifc();
+    let mut decoder = EntityDecoder::new(&content);
+    let router = GeometryRouter::with_units(&content, &mut decoder);
+
+    let wall = decoder.decode_by_id(100).expect("decode wall");
+    let mut void_index: FxHashMap<u32, Vec<u32>> = FxHashMap::default();
+    void_index.insert(100, vec![200]);
+
+    let voided = router
+        .process_element_with_voids(&wall, &mut decoder, &void_index)
+        .expect("wall with voids");
+    assert!(!voided.is_empty(), "voided wall must have geometry");
+
+    // The trapezoid's narrow edge (z ≈ 0) only reaches x ∈ [-0.3, 0.3].
+    // A true trapezoid cut introduces boundary vertices at (±0.3, ±0.15, 0).
+    // An AABB cut would instead carve the bounding box [-0.5, 0.5] × [0, 2]
+    // and put its narrow-end boundary vertices at x ≈ ±0.5. Finding vertices
+    // at (±0.3, ±0.15, 0) proves the cut respected the trapezoid shape.
+    let mut narrow_edge_vertices = 0usize;
+    for chunk in voided.positions.chunks_exact(3) {
+        let x = chunk[0];
+        let y = chunk[1];
+        let z = chunk[2];
+        let on_face = y.abs() > 0.14 && z.abs() < 0.01;
+        if on_face && (x.abs() - 0.3).abs() < 0.01 {
+            narrow_edge_vertices += 1;
+        }
+    }
+
+    assert!(
+        narrow_edge_vertices > 0,
+        "trapezoid cut must introduce boundary vertices at (±0.3, ±0.15, 0) — \
+         the narrow end of the opening. The opening was cut as its AABB \
+         (bounding rectangle) instead of its trapezoid shape."
+    );
+}
+
 /// Test mesh bounds calculation
 #[test]
 fn test_mesh_bounds() {

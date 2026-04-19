@@ -17,6 +17,10 @@ const NORMALIZE_EPSILON: f64 = 1e-12;
 /// Minimum opening volume (m³) below which CSG is skipped to avoid BSP instability.
 /// 0.0001 m³ ≈ 0.1 litre — filters artefacts while allowing small real openings (e.g. sleeves).
 const MIN_OPENING_VOLUME: f64 = 0.0001;
+/// Tolerance for deciding whether a vertex lies on an AABB face (metres).
+/// 0.1 mm is tight enough to reject curved/tilted geometry while absorbing
+/// floating-point error accumulated through the placement chain.
+const BOX_VERTEX_EPSILON: f32 = 1e-4;
 /// Fraction of pre-CSG triangles the result must retain. CSG outputs with fewer
 /// triangles than `pre_count / CSG_TRIANGLE_RETENTION_DIVISOR` are rejected as
 /// BSP blowups.
@@ -43,6 +47,41 @@ fn rotate_and_normalize(
     (rot.0 * dir.x + rot.1 * dir.y + rot.2 * dir.z)
         .try_normalize(NORMALIZE_EPSILON)
         .ok_or_else(|| Error::geometry("Zero-length direction vector".to_string()))
+}
+
+/// Whether every vertex of `mesh` sits on one of its AABB corners.
+///
+/// Cheap discriminator between axis-aligned box openings (where every vertex
+/// has each coordinate at either the mesh min or max of that axis) and
+/// everything else — cylinders, arches, beveled frames, tilted boxes. AABB
+/// clipping over-cuts non-box openings because the corners of the bounding
+/// rectangle extend beyond the actual opening (e.g. a circular window leaves
+/// four triangular "corner" regions where the wall should not be cut).
+///
+/// Only valid for meshes already expressed in the coordinate frame in which
+/// we will perform the AABB clip (world space in our callers). A tilted box
+/// in world has vertices between the AABB extremes on each axis and will be
+/// correctly rejected.
+fn mesh_fills_axis_aligned_box(mesh: &Mesh) -> bool {
+    if mesh.positions.is_empty() {
+        return false;
+    }
+    let (min, max) = mesh.bounds();
+
+    for chunk in mesh.positions.chunks_exact(3) {
+        let on_x_face =
+            (chunk[0] - min.x).abs() <= BOX_VERTEX_EPSILON || (chunk[0] - max.x).abs() <= BOX_VERTEX_EPSILON;
+        let on_y_face =
+            (chunk[1] - min.y).abs() <= BOX_VERTEX_EPSILON || (chunk[1] - max.y).abs() <= BOX_VERTEX_EPSILON;
+        let on_z_face =
+            (chunk[2] - min.z).abs() <= BOX_VERTEX_EPSILON || (chunk[2] - max.z).abs() <= BOX_VERTEX_EPSILON;
+
+        if !(on_x_face && on_y_face && on_z_face) {
+            return false;
+        }
+    }
+
+    true
 }
 
 /// Whether the representation type is geometry we can process.
@@ -806,58 +845,114 @@ impl GeometryRouter {
 
             let vertex_count = opening_mesh.positions.len() / 3;
 
+            // Coarse complexity gate: Brep / tessellated openings usually have
+            // hundreds of triangles and are always non-rectangular.
             if vertex_count > 100 {
                 openings.push(OpeningType::NonRectangular(opening_mesh));
+                continue;
+            }
+
+            let item_bounds_with_dir = self
+                .get_opening_item_bounds_with_direction(&opening_entity, decoder)
+                .unwrap_or_default();
+
+            if item_bounds_with_dir.is_empty() {
+                // No per-item geometry (unusual). Fall back to CSG when the
+                // merged opening mesh isn't axis-aligned so we don't over-cut
+                // the wall.
+                if mesh_fills_axis_aligned_box(&opening_mesh) {
+                    let (open_min, open_max) = opening_mesh.bounds();
+                    let min_f64 =
+                        Point3::new(open_min.x as f64, open_min.y as f64, open_min.z as f64);
+                    let max_f64 =
+                        Point3::new(open_max.x as f64, open_max.y as f64, open_max.z as f64);
+                    openings.push(OpeningType::Rectangular(min_f64, max_f64, None));
+                } else {
+                    openings.push(OpeningType::NonRectangular(opening_mesh));
+                }
+                continue;
+            }
+
+            let is_floor_opening = item_bounds_with_dir
+                .iter()
+                .any(|(_, _, dir)| dir.map(|d| d.z.abs() > 0.95).unwrap_or(false));
+
+            if is_floor_opening && vertex_count > 0 {
+                // Vertical slab openings can have rotated footprints whose
+                // AABB bears no resemblance to the actual cut — always CSG.
+                openings.push(OpeningType::NonRectangular(opening_mesh));
+                continue;
+            }
+
+            let any_diagonal = item_bounds_with_dir.iter().any(|(_, _, dir)| {
+                dir.map(|d| {
+                    const AXIS_THRESHOLD: f64 = 0.95;
+                    let abs_x = d.x.abs();
+                    let abs_y = d.y.abs();
+                    let abs_z = d.z.abs();
+                    !(abs_x > AXIS_THRESHOLD || abs_y > AXIS_THRESHOLD || abs_z > AXIS_THRESHOLD)
+                })
+                .unwrap_or(false)
+            });
+
+            // Per-item world meshes let us verify each representation item is
+            // actually an axis-aligned box. A low-tessellation cylinder or
+            // arched window can have ≤100 vertices and an axis-aligned
+            // extrusion direction, yet its AABB covers more wall than the
+            // opening itself — yielding oversized voids. When an item fails
+            // that check we route that item through full CSG instead.
+            let item_meshes = self
+                .get_opening_item_meshes_world(&opening_entity, decoder)
+                .unwrap_or_default();
+            let per_item_meshes = if item_meshes.len() == item_bounds_with_dir.len() {
+                Some(item_meshes)
             } else {
-                let item_bounds_with_dir = self
-                    .get_opening_item_bounds_with_direction(&opening_entity, decoder)
-                    .unwrap_or_default();
+                None
+            };
 
-                if !item_bounds_with_dir.is_empty() {
-                    let is_floor_opening = item_bounds_with_dir
-                        .iter()
-                        .any(|(_, _, dir)| dir.map(|d| d.z.abs() > 0.95).unwrap_or(false));
+            if any_diagonal {
+                // Only use the diagonal path if we have an actual extrusion direction;
+                // without one the rotation would be arbitrary and produce wrong cuts.
+                let shared_dir = item_bounds_with_dir.iter().find_map(|(_, _, d)| *d);
+                let Some(shared_dir) = shared_dir else {
+                    // No direction available — fall back to CSG
+                    openings.push(OpeningType::NonRectangular(opening_mesh));
+                    continue;
+                };
 
-                    if is_floor_opening && vertex_count > 0 {
-                        openings.push(OpeningType::NonRectangular(opening_mesh.clone()));
-                    } else {
-                        let any_diagonal = item_bounds_with_dir.iter().any(|(_, _, dir)| {
-                            dir.map(|d| {
-                                const AXIS_THRESHOLD: f64 = 0.95;
-                                let abs_x = d.x.abs();
-                                let abs_y = d.y.abs();
-                                let abs_z = d.z.abs();
-                                !(abs_x > AXIS_THRESHOLD
-                                    || abs_y > AXIS_THRESHOLD
-                                    || abs_z > AXIS_THRESHOLD)
-                            })
-                            .unwrap_or(false)
-                        });
-
-                        if any_diagonal {
-                            // Only use the diagonal path if we have an actual extrusion direction;
-                            // without one the rotation would be arbitrary and produce wrong cuts.
-                            if let Some(dir) = item_bounds_with_dir.iter().find_map(|(_, _, d)| *d)
-                            {
-                                let item_meshes = self
-                                    .get_opening_item_meshes_world(&opening_entity, decoder)
-                                    .unwrap_or_default();
-                                if item_meshes.is_empty() {
-                                    openings.push(OpeningType::DiagonalRectangular(
-                                        opening_mesh.clone(),
-                                        dir,
-                                    ));
-                                } else {
-                                    for item_mesh in item_meshes {
-                                        openings
-                                            .push(OpeningType::DiagonalRectangular(item_mesh, dir));
-                                    }
-                                }
+                match per_item_meshes {
+                    Some(meshes) => {
+                        for item_mesh in meshes {
+                            openings.push(OpeningType::DiagonalRectangular(item_mesh, shared_dir));
+                        }
+                    }
+                    None => {
+                        openings
+                            .push(OpeningType::DiagonalRectangular(opening_mesh, shared_dir));
+                    }
+                }
+            } else {
+                match per_item_meshes {
+                    Some(meshes) => {
+                        for ((min_pt, max_pt, extrusion_dir), item_mesh) in
+                            item_bounds_with_dir.into_iter().zip(meshes.into_iter())
+                        {
+                            if mesh_fills_axis_aligned_box(&item_mesh) {
+                                openings.push(OpeningType::Rectangular(
+                                    min_pt,
+                                    max_pt,
+                                    extrusion_dir,
+                                ));
                             } else {
-                                // No direction available — fall back to CSG
-                                openings.push(OpeningType::NonRectangular(opening_mesh.clone()));
+                                openings.push(OpeningType::NonRectangular(item_mesh));
                             }
-                        } else {
+                        }
+                    }
+                    None => {
+                        // Per-item meshes unavailable — fall back to the merged
+                        // mesh. Route through CSG when it isn't an axis-aligned
+                        // box to avoid AABB over-cutting.
+                        if mesh_fills_axis_aligned_box(&opening_mesh) {
                             for (min_pt, max_pt, extrusion_dir) in item_bounds_with_dir {
                                 openings.push(OpeningType::Rectangular(
                                     min_pt,
@@ -865,16 +960,10 @@ impl GeometryRouter {
                                     extrusion_dir,
                                 ));
                             }
+                        } else {
+                            openings.push(OpeningType::NonRectangular(opening_mesh));
                         }
                     }
-                } else {
-                    let (open_min, open_max) = opening_mesh.bounds();
-                    let min_f64 =
-                        Point3::new(open_min.x as f64, open_min.y as f64, open_min.z as f64);
-                    let max_f64 =
-                        Point3::new(open_max.x as f64, open_max.y as f64, open_max.z as f64);
-
-                    openings.push(OpeningType::Rectangular(min_f64, max_f64, None));
                 }
             }
         }
