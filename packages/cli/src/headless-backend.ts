@@ -23,6 +23,7 @@ import type {
   ExportBackendMethods,
   LensBackendMethods,
   FilesBackendMethods,
+  ScheduleBackendMethods,
   EntityRef,
   EntityData,
   EntityAttributeData,
@@ -46,6 +47,7 @@ import {
   extractTypePropertiesOnDemand,
   extractDocumentsOnDemand,
   extractRelationshipsOnDemand,
+  extractScheduleOnDemand,
 } from '@ifc-lite/parser';
 import { exportToStep, type StepExportOptions } from '@ifc-lite/export';
 
@@ -129,6 +131,7 @@ export class HeadlessBackend implements BimBackend {
   readonly export: ExportBackendMethods;
   readonly lens: LensBackendMethods;
   readonly files: FilesBackendMethods;
+  readonly schedule: ScheduleBackendMethods;
 
   private store: IfcDataStore;
   private modelName: string;
@@ -146,6 +149,7 @@ export class HeadlessBackend implements BimBackend {
     this.export = this.createExportAdapter();
     this.lens = this.createLensAdapter();
     this.files = this.createFilesAdapter();
+    this.schedule = this.createScheduleAdapter();
   }
 
   subscribe(_event: BimEventType, _handler: (data: unknown) => void): () => void {
@@ -503,6 +507,38 @@ export class HeadlessBackend implements BimBackend {
       text() { return null; },
       csv() { return null; },
       csvColumns() { return []; },
+    };
+  }
+
+  private createScheduleAdapter(): ScheduleBackendMethods {
+    const store = this.store;
+    const modelName = this.modelName;
+    let cached: ReturnType<ScheduleBackendMethods['data']> | null = null;
+
+    const assertModel = (modelId?: string) => {
+      // Headless mode ships exactly one model — `MODEL_ID` or the configured
+      // name. Unknown ids surface a clear error instead of silently returning
+      // the wrong data.
+      if (modelId && modelId !== MODEL_ID && modelId !== modelName) {
+        throw new Error(
+          `Unknown modelId '${modelId}' — headless backend only has '${MODEL_ID}'`,
+        );
+      }
+    };
+
+    const extract = (modelId?: string) => {
+      assertModel(modelId);
+      if (!cached) {
+        cached = extractScheduleOnDemand(store) as ReturnType<ScheduleBackendMethods['data']>;
+      }
+      return cached;
+    };
+
+    return {
+      data: (modelId) => extract(modelId),
+      tasks: (modelId) => extract(modelId).tasks,
+      workSchedules: (modelId) => extract(modelId).workSchedules,
+      sequences: (modelId) => extract(modelId).sequences,
     };
   }
 }

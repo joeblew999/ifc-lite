@@ -87,6 +87,26 @@ export type {
   BuildingParams,
   StoreyParams,
 
+  // Scheduling / 4D (IfcWorkSchedule, IfcTask, IfcRelSequence)
+  // Canonical IFC-prefixed names are preferred; legacy short names are kept
+  // as aliases for existing callers.
+  IfcWorkScheduleParams,
+  IfcWorkPlanParams,
+  IfcTaskParams,
+  IfcRelSequenceParams,
+  IfcWorkScheduleType,
+  IfcTaskPredefinedType,
+  IfcTaskDurationType,
+  IfcRelSequenceType,
+  WorkScheduleParams,
+  WorkPlanParams,
+  TaskParams,
+  SequenceParams,
+  WorkScheduleType,
+  TaskPredefinedType,
+  TaskDurationType,
+  SequenceType,
+
   // Results
   CreatedEntity,
   CreateResult,

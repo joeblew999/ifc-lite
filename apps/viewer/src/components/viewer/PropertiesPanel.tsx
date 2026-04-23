@@ -43,6 +43,8 @@ import { QuantitySetCard } from './properties/QuantitySetCard';
 import { ModelMetadataPanel } from './properties/ModelMetadataPanel';
 import { ClassificationCard } from './properties/ClassificationCard';
 import { MaterialCard } from './properties/MaterialCard';
+import { ScheduleCard } from './properties/ScheduleCard';
+import { TaskEditCard } from './properties/TaskEditCard';
 import { DocumentCard } from './properties/DocumentCard';
 import { RelationshipsCard } from './properties/RelationshipsCard';
 import type { PropertySet, QuantitySet } from './properties/encodingUtils';
@@ -546,6 +548,49 @@ export function PropertiesPanel() {
     return totalCount > 0 ? rels : null;
   }, [selectedEntity, model, ifcDataStore]);
 
+  // 4D schedule — both parsed-from-IFC and locally-generated schedules live in
+  // the schedule slice. ScheduleCard renders nothing when no task in the
+  // schedule lists this entity as a controlled product, so it's safe to call
+  // unconditionally.
+  const scheduleData = useViewerStore((s) => s.scheduleData);
+  // Single-task selection from the Gantt triggers the Task edit card —
+  // pull the set and its size so the Inspector can react to any change.
+  const selectedTaskGlobalIds = useViewerStore((s) => s.selectedTaskGlobalIds);
+  const singleSelectedTaskGlobalId = useMemo(() => {
+    if (selectedTaskGlobalIds.size !== 1) return null;
+    return selectedTaskGlobalIds.values().next().value ?? null;
+  }, [selectedTaskGlobalIds]);
+  // True when the schedule contains at least one task the user generated
+  // locally (no expressId in the host STEP). Mixed schedules — parsed tail +
+  // user-appended task — still surface the pending banner so the user sees
+  // that something will be spliced on export.
+  const scheduleIsGenerated = useMemo(() => {
+    if (!scheduleData || scheduleData.tasks.length === 0) return false;
+    return scheduleData.tasks.some(t => !t.expressId || t.expressId <= 0);
+  }, [scheduleData]);
+  const selectedEntityGlobalId = useMemo(() => {
+    if (!selectedEntity) return null;
+    const dataStore = model?.ifcDataStore ?? ifcDataStore;
+    return (dataStore as IfcDataStore | null)?.entities?.getGlobalId?.(selectedEntity.expressId) ?? null;
+  }, [selectedEntity, model, ifcDataStore]);
+  /** True when at least one task in the current schedule controls this entity —
+   *  used to keep the Inspector's empty-state from hiding a populated card.
+   *  Federation-aware: matches globalId first (see `ScheduleCard`). */
+  const hasScheduleForSelection = useMemo(() => {
+    if (!selectedEntity || !scheduleData || scheduleData.tasks.length === 0) return false;
+    const expressId = selectedEntity.expressId;
+    const gid = selectedEntityGlobalId;
+    for (const task of scheduleData.tasks) {
+      const taskHasGlobalIds = task.productGlobalIds.some(Boolean);
+      if (gid && taskHasGlobalIds) {
+        if (task.productGlobalIds.includes(gid)) return true;
+        continue;
+      }
+      if (expressId > 0 && task.productExpressIds.includes(expressId)) return true;
+    }
+    return false;
+  }, [selectedEntity, scheduleData, selectedEntityGlobalId]);
+
   // Extract georeferencing info for the model (used in coordinates section)
   const georef = useMemo(() => {
     const dataStore = model?.ifcDataStore ?? ifcDataStore;
@@ -937,7 +982,7 @@ export function PropertiesPanel() {
     return (
       <div className="h-full flex flex-col border-l-2 border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-black">
         <div className="p-3 border-b-2 border-zinc-200 dark:border-zinc-800 bg-white dark:bg-black">
-          <h2 className="font-bold uppercase tracking-wider text-xs text-zinc-900 dark:text-zinc-100">Properties</h2>
+          <h2 className="font-bold uppercase tracking-wider text-xs text-zinc-900 dark:text-zinc-100">Inspector</h2>
         </div>
         <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-white dark:bg-black">
           <div className="w-16 h-16 border-2 border-dashed border-zinc-300 dark:border-zinc-800 flex items-center justify-center mb-4 bg-zinc-100 dark:bg-zinc-950">
@@ -1270,6 +1315,16 @@ export function PropertiesPanel() {
 
         <ScrollArea className="flex-1 bg-white dark:bg-black">
           <TabsContent value="properties" className="m-0 p-3 overflow-hidden">
+            {/* Task edit card — renders when exactly one Gantt task is
+                selected. Shown above any entity properties because the
+                user's attention shifted to editing the task, not the 3D
+                element. Other tabs (quantities / relationships / bSDD)
+                still show entity content regardless. */}
+            {singleSelectedTaskGlobalId && (
+              <div className="mb-3">
+                <TaskEditCard taskGlobalId={singleSelectedTaskGlobalId} />
+              </div>
+            )}
             {/* Edit toolbar - only shown when edit mode is active */}
             {editMode && selectedEntity && !isNativeLazySelection && (
               <EditToolbar
@@ -1281,7 +1336,12 @@ export function PropertiesPanel() {
                 schemaVersion={activeDataStore?.schemaVersion}
               />
             )}
-            {renderedMergedProperties.length === 0 && renderedClassifications.length === 0 && !renderedMaterialInfo && renderedDocuments.length === 0 ? (
+            {renderedMergedProperties.length === 0
+              && renderedClassifications.length === 0
+              && !renderedMaterialInfo
+              && renderedDocuments.length === 0
+              && !renderedEntityRelationships
+              && !hasScheduleForSelection ? (
               <p className="text-sm text-zinc-500 dark:text-zinc-500 text-center py-8 font-mono">No property sets</p>
             ) : (
               <div className="space-y-3 w-full overflow-hidden">
@@ -1375,6 +1435,21 @@ export function PropertiesPanel() {
                   <>
                     <div className="border-t border-zinc-200 dark:border-zinc-800 pt-2 mt-2" />
                     <RelationshipsCard relationships={renderedEntityRelationships} />
+                  </>
+                )}
+
+                {/* 4D / Construction schedule — controlling tasks for this entity.
+                    Gated on `hasScheduleForSelection` so the separator above
+                    doesn't render on its own when ScheduleCard would return null. */}
+                {selectedEntity && scheduleData && hasScheduleForSelection && (
+                  <>
+                    <div className="border-t border-zinc-200 dark:border-zinc-800 pt-2 mt-2" />
+                    <ScheduleCard
+                      scheduleData={scheduleData}
+                      selectedExpressId={selectedEntity.expressId}
+                      selectedGlobalId={selectedEntityGlobalId}
+                      isGenerated={scheduleIsGenerated}
+                    />
                   </>
                 )}
               </div>

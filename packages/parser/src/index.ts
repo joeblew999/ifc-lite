@@ -52,6 +52,34 @@ export { extractMaterials, getMaterialForElement, getMaterialNameForElement, typ
 export { extractGeoreferencing, transformToWorld, transformToLocal, getCoordinateSystemDescription, computeAngleToGridNorth, type GeoreferenceInfo, type MapConversion, type ProjectedCRS } from './georef-extractor.js';
 export { extractClassifications, getClassificationsForElement, getClassificationCodeForElement, getClassificationPath, groupElementsByClassification, type ClassificationsData, type Classification, type ClassificationReference } from './classification-extractor.js';
 
+// 4D / scheduling extractor — IfcTask, IfcTaskTime, IfcRelSequence, IfcRelAssignsToProcess,
+// IfcRelAssignsToControl, IfcRelNests, IfcWorkSchedule, IfcWorkPlan, IfcLagTime.
+export {
+  extractScheduleOnDemand,
+  parseIso8601Duration,
+  type ScheduleExtraction,
+  type ScheduleTaskInfo,
+  type ScheduleTaskTimeInfo,
+  type ScheduleSequenceInfo,
+  type WorkScheduleInfo,
+  type SequenceTypeEnum,
+  type TaskDurationType,
+} from './schedule-extractor.js';
+
+// IFC4 STEP serializer for schedule entities — produces ready-to-splice
+// `#N=IFC...(...)` lines from a `ScheduleExtraction`.
+export {
+  serializeScheduleToStep,
+  type SerializeScheduleOptions,
+  type SerializeScheduleResult,
+} from './schedule-serializer.js';
+
+// Deterministic 22-char GlobalId generator — shared by every call site
+// that mints a synthetic IFC-style id (serializer fallback, schedule
+// generator, user-authored tasks). Never re-implement this; always
+// import from here.
+export { deterministicGlobalId } from './deterministic-global-id.js';
+
 // Generated IFC4 schema (100% coverage - 776 entities, 397 types, 207 enums)
 export { SCHEMA_REGISTRY, getEntityMetadata, getAllAttributesForEntity, getInheritanceChainForEntity, isKnownEntity } from './generated/schema-registry.js';
 export type * from './generated/entities.js';
