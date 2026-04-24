@@ -393,6 +393,7 @@ const createViewerStore = () => create<ViewerState>()((...args) => ({
       searchQuery: '',
       searchOpen: false,
       searchHighlightIndex: 0,
+      searchIndexes: new Map(),
     });
   },
 }));

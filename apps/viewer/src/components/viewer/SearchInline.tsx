@@ -26,6 +26,8 @@ import { useViewerStore } from '@/store';
 import { toGlobalIdFromModels } from '@/store/globalId';
 import { cn } from '@/lib/utils';
 import { runTier0Scan, type SearchResult, type ScanModel } from '@/lib/search/tier0-scan';
+import { queryTier1Indexes, type Tier1Index } from '@/lib/search/tier1-index';
+import { useSearchIndex } from '@/hooks/useSearchIndex';
 
 const DEBOUNCE_MS = 80;
 const RESULT_LIMIT = 50;
@@ -50,6 +52,7 @@ export function SearchInline() {
     searchQuery,
     searchOpen,
     searchHighlightIndex,
+    searchIndexes,
     setSearchQuery,
     setSearchOpen,
     setSearchHighlightIndex,
@@ -64,6 +67,7 @@ export function SearchInline() {
       searchQuery: s.searchQuery,
       searchOpen: s.searchOpen,
       searchHighlightIndex: s.searchHighlightIndex,
+      searchIndexes: s.searchIndexes,
       setSearchQuery: s.setSearchQuery,
       setSearchOpen: s.setSearchOpen,
       setSearchHighlightIndex: s.setSearchHighlightIndex,
@@ -76,6 +80,9 @@ export function SearchInline() {
     })),
   );
 
+  // Kick off lazy Tier-1 index builds for any loaded model.
+  useSearchIndex();
+
   // Debounce the query so each keystroke doesn't trigger a 4M-entity scan.
   const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
   useEffect(() => {
@@ -83,22 +90,61 @@ export function SearchInline() {
     return () => window.clearTimeout(handle);
   }, [searchQuery]);
 
-  // Snapshot the federated models into the shape the scanner needs.
-  // Memoized on the `models` Map identity (Zustand returns a new Map on
-  // every mutation), so the scanner's input array is stable between
-  // unrelated renders.
-  const scanModels = useMemo<ScanModel[]>(() => {
-    const out: ScanModel[] = [];
+  // Split models into two pools: those with a ready Tier-1 index, and
+  // those still relying on the Tier-0 linear scan. Recomputed only when
+  // either the federation or the index map changes identity.
+  const { tier0Models, tier1Indexes, indexingCount } = useMemo(() => {
+    const t0: ScanModel[] = [];
+    const t1: Tier1Index[] = [];
+    let building = 0;
     for (const m of models.values()) {
-      if (m.ifcDataStore) out.push({ id: m.id, ifcDataStore: m.ifcDataStore });
+      if (!m.ifcDataStore) continue;
+      const record = searchIndexes.get(m.id);
+      if (record?.status === 'ready' && record.index) {
+        t1.push(record.index);
+      } else {
+        t0.push({ id: m.id, ifcDataStore: m.ifcDataStore });
+        if (record?.status === 'building') building += 1;
+      }
     }
-    return out;
-  }, [models]);
+    return { tier0Models: t0, tier1Indexes: t1, indexingCount: building };
+  }, [models, searchIndexes]);
 
   const results = useMemo<SearchResult[]>(() => {
-    if (!debouncedQuery.trim() || scanModels.length === 0) return [];
-    return runTier0Scan(scanModels, debouncedQuery, { limit: RESULT_LIMIT });
-  }, [scanModels, debouncedQuery]);
+    if (!debouncedQuery.trim()) return [];
+    if (tier0Models.length === 0 && tier1Indexes.length === 0) return [];
+
+    const t1Results =
+      tier1Indexes.length > 0
+        ? queryTier1Indexes(tier1Indexes, debouncedQuery, { limit: RESULT_LIMIT })
+        : [];
+    const t0Results =
+      tier0Models.length > 0
+        ? runTier0Scan(tier0Models, debouncedQuery, { limit: RESULT_LIMIT })
+        : [];
+
+    if (t1Results.length === 0) return t0Results;
+    if (t0Results.length === 0) return t1Results;
+
+    // Merge + dedupe. Scores from Tier-0 and Tier-1 share the same ladder
+    // so a descending-score sort is stable between them.
+    const combined = [...t1Results, ...t0Results];
+    combined.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (a.modelId !== b.modelId) return a.modelId < b.modelId ? -1 : 1;
+      return a.expressId - b.expressId;
+    });
+    const seen = new Set<string>();
+    const out: SearchResult[] = [];
+    for (const r of combined) {
+      const key = `${r.modelId}:${r.expressId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+      if (out.length >= RESULT_LIMIT) break;
+    }
+    return out;
+  }, [tier0Models, tier1Indexes, debouncedQuery]);
 
   // Keep the highlight index in range as results change.
   useEffect(() => {
@@ -249,6 +295,7 @@ export function SearchInline() {
           results={results}
           highlightIndex={searchHighlightIndex}
           modelsCount={models.size}
+          indexingCount={indexingCount}
           onSelect={(r, additive) => selectResult(r, additive)}
           onHover={(i) => setSearchHighlightIndex(i)}
         />
@@ -261,11 +308,19 @@ interface SearchPopoverProps {
   results: SearchResult[];
   highlightIndex: number;
   modelsCount: number;
+  indexingCount: number;
   onSelect: (r: SearchResult, additive: boolean) => void;
   onHover: (index: number) => void;
 }
 
-function SearchPopover({ results, highlightIndex, modelsCount, onSelect, onHover }: SearchPopoverProps) {
+function SearchPopover({
+  results,
+  highlightIndex,
+  modelsCount,
+  indexingCount,
+  onSelect,
+  onHover,
+}: SearchPopoverProps) {
   if (results.length === 0) {
     return (
       <div
@@ -273,7 +328,9 @@ function SearchPopover({ results, highlightIndex, modelsCount, onSelect, onHover
         role="listbox"
         className="absolute left-0 right-0 top-full mt-1 rounded-md border border-zinc-200 bg-white px-3 py-4 text-xs text-muted-foreground shadow-lg dark:border-zinc-800 dark:bg-zinc-950 z-50"
       >
-        No results — try a name, IFC type, or full GlobalId.
+        {indexingCount > 0
+          ? `Indexing ${indexingCount} model${indexingCount === 1 ? '' : 's'}… results appear as rows become searchable.`
+          : 'No results — try a name, IFC type, or full GlobalId.'}
       </div>
     );
   }
@@ -323,6 +380,7 @@ function SearchPopover({ results, highlightIndex, modelsCount, onSelect, onHover
       ))}
       <div className="border-t border-zinc-200 px-3 py-1 text-[10px] text-muted-foreground dark:border-zinc-800">
         {results.length} result{results.length === 1 ? '' : 's'} · ↑↓ nav · ↵ select · ⇧↵ multi · Esc close
+        {indexingCount > 0 && <span className="ml-2 opacity-80">· indexing {indexingCount}…</span>}
       </div>
     </div>
   );
