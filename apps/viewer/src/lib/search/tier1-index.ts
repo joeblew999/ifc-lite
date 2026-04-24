@@ -101,8 +101,14 @@ function tokenize(value: string): string[] {
   return out;
 }
 
-/** Yield control back to the event loop between chunks. Mirrors the pattern
- *  used by `packages/parser/src/columnar-parser.ts:yieldToEventLoop`. */
+/** Yield control back to the event loop between chunks.
+ *
+ *  Mirrors the pattern used by `packages/parser/src/columnar-parser.ts`
+ *  but closes the MessageChannel ports in the fallback path — an unclosed
+ *  port keeps Node's event loop alive and hangs the test runner on
+ *  shutdown. `scheduler.yield` (when present) and `setImmediate` (Node)
+ *  don't have this problem.
+ */
 function yieldToEventLoop(): Promise<void> {
   const maybeScheduler = (globalThis as typeof globalThis & {
     scheduler?: { yield?: () => Promise<void> };
@@ -110,9 +116,18 @@ function yieldToEventLoop(): Promise<void> {
   if (typeof maybeScheduler?.yield === 'function') {
     return maybeScheduler.yield();
   }
+  if (typeof setImmediate === 'function') {
+    return new Promise<void>((resolve) => {
+      setImmediate(() => resolve());
+    });
+  }
   return new Promise<void>((resolve) => {
     const channel = new MessageChannel();
-    channel.port1.onmessage = () => resolve();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      channel.port2.close();
+      resolve();
+    };
     channel.port2.postMessage(null);
   });
 }
