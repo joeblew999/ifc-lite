@@ -26,6 +26,29 @@ export async function handleSelectionClick(ctx: MouseHandlerContext, e: MouseEve
     return;
   }
 
+  // Section-tool face-pick: click any visible face and the plane is set
+  // through it. Intercept before the generic select path so the click
+  // doesn't also flip selection.
+  if (tool === 'section' && ctx.sectionPickModeRef?.current) {
+    const hit = renderer.raycastScene(x, y, {
+      hiddenIds: ctx.hiddenEntitiesRef.current,
+      isolatedIds: ctx.isolatedEntitiesRef.current,
+    });
+    if (hit?.intersection) {
+      const n = hit.intersection.normal;
+      const p = hit.intersection.point;
+      ctx.setSectionPlaneFromFace?.(
+        [n.x, n.y, n.z],
+        [p.x, p.y, p.z],
+      );
+    } else {
+      // Missed geometry — cancel the arm so the user isn't stuck in pick
+      // mode after an errant background click.
+      ctx.setSectionPickMode?.(false);
+    }
+    return;
+  }
+
   // Skip selection for pan/walk tools - they don't select
   if (tool === 'pan' || tool === 'walk') {
     return;

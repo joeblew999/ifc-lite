@@ -20,6 +20,14 @@ export interface SectionPlaneRenderOptions {
   isPreview?: boolean; // If true, render as preview (less opacity)
   min?: number;      // Optional override for min range value
   max?: number;      // Optional override for max range value
+  /**
+   * Optional explicit plane normal (unit vector) and signed distance from
+   * origin. When both are provided, the gizmo is placed on that world-space
+   * plane and its quad is built from an orthonormal basis derived from the
+   * normal — `axis`/`position`/`min`/`max` are ignored.
+   */
+  normal?: [number, number, number];
+  distance?: number;
 }
 
 export class SectionPlaneRenderer {
@@ -257,15 +265,21 @@ export class SectionPlaneRenderer {
       return;
     }
 
-    const { axis, position, bounds, viewProj, isPreview, min: minOverride, max: maxOverride } = options;
+    const { axis, position, bounds, viewProj, isPreview, min: minOverride, max: maxOverride, normal, distance } = options;
 
     // Only draw section plane in preview mode - hide it during active cutting
     if (!isPreview) {
       return;
     }
 
-    // Calculate plane vertices based on axis and bounds
-    const vertices = this.calculatePlaneVertices(axis, position, bounds, 0, minOverride, maxOverride);
+    const hasExplicitPlane =
+      normal !== undefined &&
+      distance !== undefined &&
+      Number.isFinite(distance);
+
+    const vertices = hasExplicitPlane
+      ? this.calculatePlaneVerticesFromNormal(normal!, distance!, bounds)
+      : this.calculatePlaneVertices(axis, position, bounds, 0, minOverride, maxOverride);
     this.device.queue.writeBuffer(this.vertexBuffer, 0, vertices);
 
     // Update uniforms
@@ -273,8 +287,14 @@ export class SectionPlaneRenderer {
     uniforms.set(viewProj, 0);
 
     // Axis-specific colors for better identification
-    // down (Y) = light blue, front (Z) = green, side (X) = orange
-    if (axis === 'down') {
+    // down (Y) = light blue, front (Z) = green, side (X) = orange.
+    // Custom planes (face-pick) pick up a neutral violet that won't be
+    // confused with any cardinal axis.
+    if (hasExplicitPlane) {
+      uniforms[16] = 0.612; // R - #9C6BDE (violet)
+      uniforms[17] = 0.420; // G
+      uniforms[18] = 0.871; // B
+    } else if (axis === 'down') {
       uniforms[16] = 0.012; // R - #03A9F4
       uniforms[17] = 0.663; // G
       uniforms[18] = 0.957; // B
@@ -377,6 +397,92 @@ export class SectionPlaneRenderer {
     }
 
     return new Float32Array(vertices);
+  }
+
+  /**
+   * Compute 6 vertices (two triangles) for the visualization quad of an
+   * arbitrary plane defined by a world-space unit normal and signed distance
+   * from origin (plane equation: `dot(p, n) = d`). The quad is centred on the
+   * foot of the perpendicular from the bounds centre, oriented via an
+   * orthonormal basis derived from the normal, and sized from the bounds'
+   * diagonal so it visibly covers the model no matter how the plane is tilted.
+   */
+  private calculatePlaneVerticesFromNormal(
+    normal: [number, number, number],
+    distance: number,
+    bounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }
+  ): Float32Array {
+    const { min, max } = bounds;
+
+    // Defensive renormalisation so callers passing e.g. mesh face normals
+    // (which can drift from unit length by quantisation) still get a valid
+    // quad — matches the same defence applied in the main renderer.
+    let nx = normal[0];
+    let ny = normal[1];
+    let nz = normal[2];
+    const nlen = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (nlen < 1e-6) {
+      return new Float32Array(30); // degenerate; draw nothing
+    }
+    nx /= nlen; ny /= nlen; nz /= nlen;
+    const d = distance / nlen;
+
+    // Foot of the perpendicular from the bounds centre projected onto the
+    // plane — keeps the gizmo anchored near the model even when the plane
+    // would otherwise sit far from the origin.
+    const cx = (min.x + max.x) / 2;
+    const cy = (min.y + max.y) / 2;
+    const cz = (min.z + max.z) / 2;
+    const s = d - (cx * nx + cy * ny + cz * nz);
+    const px = cx + nx * s;
+    const py = cy + ny * s;
+    const pz = cz + nz * s;
+
+    // Orthonormal basis {u, v} in the plane. Pick a reference axis that is
+    // not parallel to the normal, cross-product to get `u`, then cross again
+    // for `v`. This is the classic "arbitrary perpendicular" trick.
+    const refX = Math.abs(nx) < 0.9 ? 1 : 0;
+    const refY = Math.abs(nx) < 0.9 ? 0 : 1;
+    const refZ = 0;
+    let ux = ny * refZ - nz * refY;
+    let uy = nz * refX - nx * refZ;
+    let uz = nx * refY - ny * refX;
+    const ulen = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
+    ux /= ulen; uy /= ulen; uz /= ulen;
+    const vx = ny * uz - nz * uy;
+    const vy = nz * ux - nx * uz;
+    const vz = nx * uy - ny * ux;
+
+    // Size the quad from the bounds' diagonal with 10% padding, matching the
+    // axis-aligned path's visual scale.
+    const dx = max.x - min.x;
+    const dy = max.y - min.y;
+    const dz = max.z - min.z;
+    const half = 0.55 * Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+    const p0x = px - ux * half - vx * half;
+    const p0y = py - uy * half - vy * half;
+    const p0z = pz - uz * half - vz * half;
+    const p1x = px + ux * half - vx * half;
+    const p1y = py + uy * half - vy * half;
+    const p1z = pz + uz * half - vz * half;
+    const p2x = px + ux * half + vx * half;
+    const p2y = py + uy * half + vy * half;
+    const p2z = pz + uz * half + vz * half;
+    const p3x = px - ux * half + vx * half;
+    const p3y = py - uy * half + vy * half;
+    const p3z = pz - uz * half + vz * half;
+
+    return new Float32Array([
+      // Triangle 1
+      p0x, p0y, p0z, 0, 0,
+      p1x, p1y, p1z, 1, 0,
+      p2x, p2y, p2z, 1, 1,
+      // Triangle 2
+      p0x, p0y, p0z, 0, 0,
+      p2x, p2y, p2z, 1, 1,
+      p3x, p3y, p3z, 0, 1,
+    ]);
   }
 
   /**

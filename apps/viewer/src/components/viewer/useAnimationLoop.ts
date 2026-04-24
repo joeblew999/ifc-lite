@@ -181,6 +181,10 @@ export function useAnimationLoop(params: UseAnimationLoopParams): void {
             capStyle: sectionPlaneRef.current.capStyle,
             min: sectionRangeRef.current?.min,
             max: sectionRangeRef.current?.max,
+            // Face-pick overrides — when set, the renderer uses these
+            // verbatim and ignores axis/position/min/max.
+            normal: sectionPlaneRef.current.normal,
+            distance: sectionPlaneRef.current.distance,
           } : undefined,
           terrainClipY: terrainClipYRef.current ?? undefined,
         });

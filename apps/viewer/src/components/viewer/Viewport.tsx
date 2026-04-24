@@ -195,7 +195,7 @@ export function Viewport({
   const isolatedEntities = computedIsolatedIds ?? storeIsolatedEntities ?? null;
 
   // Tool state
-  const { activeTool, sectionPlane } = useToolState();
+  const { activeTool, sectionPlane, sectionPickMode, setSectionPlaneFromFace, setSectionPickMode } = useToolState();
 
   // Camera state
   const { updateCameraRotationRealtime, updateScaleRealtime, setCameraCallbacks } = useCameraState();
@@ -381,6 +381,7 @@ export function Viewport({
   const measurementConstraintEdgeRef = useLatestRef(measurementConstraintEdge);
   const sectionPlaneRef = useLatestRef(sectionPlane);
   const sectionRangeRef = useLatestRef(sectionRange);
+  const sectionPickModeRef = useLatestRef(sectionPickMode);
   const visualEnhancementRef = useLatestRef(visualEnhancement);
 
   // Terrain clip Y from Cesium store (read as ref for animation loop)
@@ -455,13 +456,21 @@ export function Viewport({
       }
     }
 
+    // Leaving the section tool disarms face-pick so it doesn't surprise
+    // the user on re-entry to a different tool.
+    if (activeTool !== 'section' && sectionPickMode) {
+      setSectionPickMode(false);
+    }
+
     // Set cursor based on active tool
     if (activeTool === 'measure') {
+      canvas.style.cursor = 'crosshair';
+    } else if (activeTool === 'section' && sectionPickMode) {
       canvas.style.cursor = 'crosshair';
     } else {
       canvas.style.cursor = 'default';
     }
-  }, [activeTool, activeMeasurement, cancelMeasurement]);
+  }, [activeTool, activeMeasurement, cancelMeasurement, sectionPickMode, setSectionPickMode]);
 
   // Helper: calculate scale bar value (world-space size for 96px scale bar)
   const calculateScale = () => {
@@ -713,6 +722,7 @@ export function Viewport({
     snapEnabledRef,
     edgeLockStateRef,
     measurementConstraintEdgeRef,
+    sectionPickModeRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
     selectedEntityIdRef,
@@ -737,6 +747,8 @@ export function Viewport({
     setHoverState,
     clearHover,
     openContextMenu,
+    setSectionPlaneFromFace,
+    setSectionPickMode,
     startMeasurement,
     updateMeasurement,
     finalizeMeasurement,

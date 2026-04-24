@@ -7,7 +7,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { X, Slice, ChevronDown, FileImage, FlipHorizontal2 } from 'lucide-react';
+import { X, Slice, ChevronDown, FileImage, FlipHorizontal2, MousePointerClick } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useViewerStore } from '@/store';
 import { AXIS_INFO } from './sectionConstants';
@@ -16,8 +16,10 @@ import { SectionCapControls } from './SectionCapControls';
 
 export function SectionOverlay() {
   const sectionPlane = useViewerStore((s) => s.sectionPlane);
+  const sectionPickMode = useViewerStore((s) => s.sectionPickMode);
   const setSectionPlaneAxis = useViewerStore((s) => s.setSectionPlaneAxis);
   const setSectionPlanePosition = useViewerStore((s) => s.setSectionPlanePosition);
+  const setSectionPickMode = useViewerStore((s) => s.setSectionPickMode);
   const toggleSectionPlane = useViewerStore((s) => s.toggleSectionPlane);
   const flipSectionPlane = useViewerStore((s) => s.flipSectionPlane);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
@@ -25,14 +27,22 @@ export function SectionOverlay() {
   const drawingPanelVisible = useViewerStore((s) => s.drawing2DPanelVisible);
   const clearDrawing = useViewerStore((s) => s.clearDrawing2D);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(true);
+  const isCustomPlane = sectionPlane.normal !== undefined && sectionPlane.distance !== undefined;
 
   const handleClose = useCallback(() => {
     setActiveTool('select');
   }, [setActiveTool]);
 
   const handleAxisChange = useCallback((axis: 'down' | 'front' | 'side') => {
+    // Re-selecting a preset also cancels any pending face-pick so the UI
+    // doesn't stay in a half-armed state.
+    setSectionPickMode(false);
     setSectionPlaneAxis(axis);
-  }, [setSectionPlaneAxis]);
+  }, [setSectionPlaneAxis, setSectionPickMode]);
+
+  const handlePickFaceToggle = useCallback(() => {
+    setSectionPickMode(!sectionPickMode);
+  }, [sectionPickMode, setSectionPickMode]);
 
   const handlePositionChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = Number(e.target.value);
@@ -93,7 +103,7 @@ export function SectionOverlay() {
                 {(['down', 'front', 'side'] as const).map((axis) => (
                   <Button
                     key={axis}
-                    variant={sectionPlane.axis === axis ? 'default' : 'outline'}
+                    variant={!isCustomPlane && sectionPlane.axis === axis ? 'default' : 'outline'}
                     size="sm"
                     className="flex-1 flex-col h-auto py-1.5"
                     onClick={() => handleAxisChange(axis)}
@@ -102,6 +112,21 @@ export function SectionOverlay() {
                   </Button>
                 ))}
               </div>
+              <Button
+                variant={sectionPickMode ? 'default' : isCustomPlane ? 'secondary' : 'outline'}
+                size="sm"
+                className="mt-1.5 w-full h-auto py-1.5"
+                onClick={handlePickFaceToggle}
+                aria-pressed={sectionPickMode}
+                title={sectionPickMode
+                  ? 'Click any face to cut through it'
+                  : 'Pick any face in the model to cut through'}
+              >
+                <MousePointerClick className="h-3 w-3 mr-1.5" />
+                <span className="text-xs font-medium">
+                  {sectionPickMode ? 'Click a face…' : isCustomPlane ? 'Custom plane — pick again' : 'Pick face'}
+                </span>
+              </Button>
             </div>
 
             {/* Position Slider */}

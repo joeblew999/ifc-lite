@@ -108,6 +108,12 @@ const saveShowOutlines = (v: boolean) => saveBoolean(OUTLINES_SHOW_STORAGE_KEY, 
 export interface SectionSlice {
   // State
   sectionPlane: SectionPlane;
+  /**
+   * When true, the next click on the canvas picks a face and sets the
+   * section plane through it (world-space normal + point). Cleared after
+   * one pick or when the tool changes.
+   */
+  sectionPickMode: boolean;
 
   // Actions
   setSectionPlaneAxis: (axis: SectionPlaneAxis) => void;
@@ -119,6 +125,17 @@ export interface SectionSlice {
   setSectionShowOutlines: (show: boolean) => void;
   setSectionCapStyle: (style: Partial<SectionCapStyle>) => void;
   resetSectionPlane: () => void;
+  /**
+   * Set the section plane from a face pick. `normal` is the face's
+   * world-space unit normal; `point` is any point on the face (typically
+   * the raycast intersection). The derived plane equation is
+   * `dot(worldPos, normal) = dot(point, normal)`.
+   */
+  setSectionPlaneFromFace: (
+    normal: [number, number, number],
+    point: [number, number, number],
+  ) => void;
+  setSectionPickMode: (enabled: boolean) => void;
 }
 
 const getDefaultCapStyle = (): SectionCapStyle => loadCapStyle();
@@ -137,15 +154,42 @@ const getDefaultSectionPlane = (): SectionPlane => ({
   capStyle:     getDefaultCapStyle(),
 });
 
+/**
+ * Map an arbitrary world-space unit normal to the closest cardinal axis
+ * ('down' = Y, 'front' = Z, 'side' = X). Used so downstream code that still
+ * reads `sectionPlane.axis` (drawings export, BCF snapshots) continues to
+ * work with face-picked planes — it gets the nearest axis approximation
+ * rather than a runtime crash.
+ */
+function nearestCardinalAxis(
+  normal: [number, number, number],
+): SectionPlaneAxis {
+  const ax = Math.abs(normal[0]);
+  const ay = Math.abs(normal[1]);
+  const az = Math.abs(normal[2]);
+  if (ay >= ax && ay >= az) return 'down';
+  if (ax >= az) return 'side';
+  return 'front';
+}
+
 export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice> = (set) => ({
   // Initial state
   sectionPlane: getDefaultSectionPlane(),
+  sectionPickMode: false,
 
   // Actions
   setSectionPlaneAxis: (axis) => set((state) => ({
     // Changing the axis implicitly means "I want to cut now" — enable the clip
     // so users don't get stuck in a confusing no-op preview.
-    sectionPlane: { ...state.sectionPlane, axis, enabled: true },
+    // Also drop any custom normal/distance left over from face-pick so the
+    // preset takes over cleanly.
+    sectionPlane: {
+      ...state.sectionPlane,
+      axis,
+      enabled: true,
+      normal: undefined,
+      distance: undefined,
+    },
   })),
 
   setSectionPlanePosition: (position) => set((state) => {
@@ -154,8 +198,15 @@ export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice
     return {
       // Moving the slider also enables the cut — previously you had to press
       // "Cutting" separately, which led to the "it just jitters, doesn't cut"
-      // feedback from users.
-      sectionPlane: { ...state.sectionPlane, position: clampedPosition, enabled: true },
+      // feedback from users. Also drop any custom normal/distance so the
+      // slider returns to controlling the axis-aligned preset.
+      sectionPlane: {
+        ...state.sectionPlane,
+        position: clampedPosition,
+        enabled: true,
+        normal: undefined,
+        distance: undefined,
+      },
     };
   }),
 
@@ -199,6 +250,31 @@ export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice
     } catch (error) {
       console.warn('[section] failed to clear persisted cap preferences', error);
     }
-    return { sectionPlane: getDefaultSectionPlane() };
+    return { sectionPlane: getDefaultSectionPlane(), sectionPickMode: false };
   }),
+
+  setSectionPlaneFromFace: (normal, point) => set((state) => {
+    const nx = normal[0];
+    const ny = normal[1];
+    const nz = normal[2];
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    // Degenerate normal: no-op rather than poisoning the renderer with NaNs.
+    if (!Number.isFinite(len) || len < 1e-6) {
+      return { sectionPickMode: false };
+    }
+    const unit: [number, number, number] = [nx / len, ny / len, nz / len];
+    const distance = point[0] * unit[0] + point[1] * unit[1] + point[2] * unit[2];
+    return {
+      sectionPlane: {
+        ...state.sectionPlane,
+        axis: nearestCardinalAxis(unit),
+        normal: unit,
+        distance,
+        enabled: true,
+      },
+      sectionPickMode: false,
+    };
+  }),
+
+  setSectionPickMode: (enabled) => set(() => ({ sectionPickMode: enabled })),
 });

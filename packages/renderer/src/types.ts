@@ -129,6 +129,15 @@ export interface SectionPlane {
   flipped?: boolean; // If true, show the opposite side of the cut
   min?: number;      // Optional override for min range value
   max?: number;      // Optional override for max range value
+  /**
+   * Optional world-space plane normal (unit vector). When provided together
+   * with `distance`, the renderer uses them verbatim and ignores `axis`,
+   * `position`, `min`, `max`, and any `buildingRotation`. Used for face-pick
+   * / arbitrary slice planes.
+   */
+  normal?: [number, number, number];
+  /** Signed plane offset: `dot(pointOnPlane, normal)`. Paired with `normal`. */
+  distance?: number;
   /** If true (default), render filled cap surfaces with a screen-space hatch. */
   showCap?: boolean;
   /**

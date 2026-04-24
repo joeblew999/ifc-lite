@@ -56,6 +56,8 @@ export interface UseMouseControlsParams {
   snapEnabledRef: MutableRefObject<boolean>;
   edgeLockStateRef: MutableRefObject<EdgeLockState>;
   measurementConstraintEdgeRef: MutableRefObject<MeasurementConstraintEdge | null>;
+  /** Section tool: when true, next click arms a face-pick for the clip plane. */
+  sectionPickModeRef: MutableRefObject<boolean>;
 
   // Visibility/selection refs
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
@@ -121,6 +123,13 @@ export interface UseMouseControlsParams {
   calculateScale: () => void;
   getPickOptions: () => { isStreaming: boolean; hiddenIds: Set<number>; isolatedIds: Set<number> | null };
   hasPendingMeasurements: () => boolean;
+  /** Section face-pick: set the clip plane through a world-space face. */
+  setSectionPlaneFromFace: (
+    normal: [number, number, number],
+    point: [number, number, number],
+  ) => void;
+  /** Section face-pick: arm/disarm the "next click picks a face" mode. */
+  setSectionPickMode: (enabled: boolean) => void;
 
   // Constants
   HOVER_SNAP_THROTTLE_MS: number;
@@ -144,6 +153,7 @@ export function useMouseControls(params: UseMouseControlsParams): void {
     snapEnabledRef,
     edgeLockStateRef,
     measurementConstraintEdgeRef,
+    sectionPickModeRef,
     hiddenEntitiesRef,
     isolatedEntitiesRef,
     selectedEntityIdRef,
@@ -168,6 +178,8 @@ export function useMouseControls(params: UseMouseControlsParams): void {
     setHoverState,
     clearHover,
     openContextMenu,
+    setSectionPlaneFromFace,
+    setSectionPickMode,
     startMeasurement,
     updateMeasurement,
     finalizeMeasurement,
@@ -212,6 +224,9 @@ export function useMouseControls(params: UseMouseControlsParams): void {
       snapEnabledRef,
       edgeLockStateRef,
       measurementConstraintEdgeRef,
+      sectionPickModeRef,
+      setSectionPlaneFromFace,
+      setSectionPickMode,
       hiddenEntitiesRef,
       isolatedEntitiesRef,
       geometryRef,

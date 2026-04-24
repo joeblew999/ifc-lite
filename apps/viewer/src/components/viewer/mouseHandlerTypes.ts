@@ -56,6 +56,17 @@ export interface MouseHandlerContext {
   snapEnabledRef: MutableRefObject<boolean>;
   edgeLockStateRef: MutableRefObject<EdgeLockState>;
   measurementConstraintEdgeRef: MutableRefObject<MeasurementConstraintEdge | null>;
+  /** Latest value of `sectionPickMode` from the section slice. Optional so
+   * existing callers that don't care about section face-pick don't have to
+   * thread it through. */
+  sectionPickModeRef?: MutableRefObject<boolean>;
+  /** Action: set plane through a world-space face. */
+  setSectionPlaneFromFace?: (
+    normal: [number, number, number],
+    point: [number, number, number],
+  ) => void;
+  /** Action: arm/disarm face-pick mode. */
+  setSectionPickMode?: (enabled: boolean) => void;
 
   // Visibility refs
   hiddenEntitiesRef: MutableRefObject<Set<number>>;
