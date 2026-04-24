@@ -4,6 +4,7 @@ node = "22"
 # Server binary also builds fine on this.
 rust = "nightly-2025-11-15"
 "cargo:wasm-pack" = "latest"
+"npm:turbo" = "2"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
@@ -19,27 +20,27 @@ depends = ["install"]
 
 [tasks.build]
 description = "Build all packages (WASM + TS)"
-run = "pnpm build"
+run = "turbo build"
 depends = ["wasm"]
 
 [tasks.dev]
 description = "Start viewer dev server"
-run = "pnpm dev"
+run = "turbo dev --filter viewer"
 depends = ["wasm"]
 
 [tasks.test]
 description = "Run all tests"
-run = "pnpm test"
-depends = ["build"]
+run = "turbo test"
+depends = ["wasm"]
 
 [tasks.typecheck]
 description = "Type-check all packages"
-run = "pnpm typecheck"
+run = "turbo typecheck"
 depends = ["wasm"]
 
 [tasks.lint]
 description = "Lint all packages"
-run = "pnpm lint"
+run = "turbo lint"
 depends = ["wasm"]
 
 [tasks.server]
