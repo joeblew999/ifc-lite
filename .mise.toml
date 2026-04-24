@@ -1,0 +1,54 @@
+[tools]
+node = "22"
+# Nightly required for WASM build (build-std feature).
+# Server binary also builds fine on this.
+rust = "nightly-2025-11-15"
+"cargo:wasm-pack" = "latest"
+
+[env]
+# pnpm is managed via corepack (bundled with node)
+
+[tasks.install]
+description = "Install JS dependencies"
+run = "corepack enable && pnpm install"
+
+[tasks.wasm]
+description = "Build Rust WASM bindings"
+run = "bash scripts/build-wasm.sh"
+depends = ["install"]
+
+[tasks.build]
+description = "Build all packages (WASM + TS)"
+run = "pnpm build"
+depends = ["wasm"]
+
+[tasks.dev]
+description = "Start viewer dev server"
+run = "pnpm dev"
+depends = ["wasm"]
+
+[tasks.test]
+description = "Run all tests"
+run = "pnpm test"
+depends = ["build"]
+
+[tasks.typecheck]
+description = "Type-check all packages"
+run = "pnpm typecheck"
+depends = ["wasm"]
+
+[tasks.lint]
+description = "Lint all packages"
+run = "pnpm lint"
+depends = ["wasm"]
+
+[tasks.server]
+description = "Build Rust server binary"
+run = "cargo build --release --package ifc-lite-server"
+
+[tasks.clean]
+description = "Clean all build outputs"
+run = """
+rm -rf packages/*/dist apps/*/dist packages/wasm/pkg target
+pnpm store prune 2>/dev/null || true
+"""
