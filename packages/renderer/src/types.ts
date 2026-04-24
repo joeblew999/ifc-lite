@@ -130,14 +130,12 @@ export interface SectionPlane {
   min?: number;      // Optional override for min range value
   max?: number;      // Optional override for max range value
   /**
-   * Optional world-space plane normal (unit vector). When provided together
-   * with `distance`, the renderer uses them verbatim and ignores `axis`,
-   * `position`, `min`, `max`, and any `buildingRotation`. Used for face-pick
-   * / arbitrary slice planes.
+   * Optional world-space plane normal (unit vector). When provided, the
+   * renderer projects the model bounds onto `normal` and uses `position`
+   * (0-100%) to interpolate the plane along that range. `axis`, `min`,
+   * `max`, and `buildingRotation` are ignored for this path.
    */
   normal?: [number, number, number];
-  /** Signed plane offset: `dot(pointOnPlane, normal)`. Paired with `normal`. */
-  distance?: number;
   /** If true (default), render filled cap surfaces with a screen-space hatch. */
   showCap?: boolean;
   /**

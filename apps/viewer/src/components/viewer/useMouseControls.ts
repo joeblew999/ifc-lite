@@ -126,7 +126,7 @@ export interface UseMouseControlsParams {
   /** Section face-pick: set the clip plane through a world-space face. */
   setSectionPlaneFromFace: (
     normal: [number, number, number],
-    point: [number, number, number],
+    position: number,
   ) => void;
   /** Section face-pick: arm/disarm the "next click picks a face" mode. */
   setSectionPickMode: (enabled: boolean) => void;

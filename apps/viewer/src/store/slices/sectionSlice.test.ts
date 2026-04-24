@@ -181,68 +181,75 @@ describe('SectionSlice', () => {
   });
 
   describe('setSectionPlaneFromFace', () => {
-    it('should set a unit normal and derive distance from dot(point, normal)', () => {
-      state.setSectionPlaneFromFace([0, 1, 0], [10, 5, 20]);
+    it('should set a unit normal and adopt the caller-supplied position', () => {
+      state.setSectionPlaneFromFace([0, 1, 0], 37);
       assert.deepStrictEqual(state.sectionPlane.normal, [0, 1, 0]);
-      assert.strictEqual(state.sectionPlane.distance, 5);
+      assert.strictEqual(state.sectionPlane.position, 37);
       assert.strictEqual(state.sectionPlane.enabled, true);
     });
 
-    it('should normalise a non-unit normal and scale distance accordingly', () => {
-      // Normal [3, 0, 0] (length 3) plus point (3,0,0) means the plane goes
-      // through (3,0,0) with unit normal [1,0,0], so distance = 3.
-      state.setSectionPlaneFromFace([3, 0, 0], [3, 0, 0]);
+    it('should normalise a non-unit normal', () => {
+      // Normal [3, 0, 0] (length 3) should become [1, 0, 0].
+      state.setSectionPlaneFromFace([3, 0, 0], 50);
       const n = state.sectionPlane.normal!;
       assert.ok(Math.abs(n[0] - 1) < 1e-9);
       assert.ok(Math.abs(n[1]) < 1e-9);
       assert.ok(Math.abs(n[2]) < 1e-9);
-      assert.ok(Math.abs(state.sectionPlane.distance! - 3) < 1e-9);
+    });
+
+    it('should clamp position to [0, 100]', () => {
+      state.setSectionPlaneFromFace([0, 1, 0], 150);
+      assert.strictEqual(state.sectionPlane.position, 100);
+      state.setSectionPlaneFromFace([0, 1, 0], -10);
+      assert.strictEqual(state.sectionPlane.position, 0);
     });
 
     it('should pick the nearest cardinal axis for downstream readers', () => {
       // Mostly-Y with a touch of X should map to 'down' (Y axis preset).
-      state.setSectionPlaneFromFace([0.1, 0.99, 0.0], [0, 0, 0]);
+      state.setSectionPlaneFromFace([0.1, 0.99, 0.0], 50);
       assert.strictEqual(state.sectionPlane.axis, 'down');
 
-      state.setSectionPlaneFromFace([0.99, 0.1, 0.0], [0, 0, 0]);
+      state.setSectionPlaneFromFace([0.99, 0.1, 0.0], 50);
       assert.strictEqual(state.sectionPlane.axis, 'side');
 
-      state.setSectionPlaneFromFace([0.0, 0.1, 0.99], [0, 0, 0]);
+      state.setSectionPlaneFromFace([0.0, 0.1, 0.99], 50);
       assert.strictEqual(state.sectionPlane.axis, 'front');
     });
 
     it('should disarm pick mode after a successful pick', () => {
       state.setSectionPickMode(true);
-      state.setSectionPlaneFromFace([0, 1, 0], [0, 0, 0]);
+      state.setSectionPlaneFromFace([0, 1, 0], 50);
       assert.strictEqual(state.sectionPickMode, false);
     });
 
     it('should ignore a degenerate normal and not poison the plane state', () => {
       state.setSectionPlaneAxis('down'); // clears any prior custom plane
       state.setSectionPickMode(true);
-      state.setSectionPlaneFromFace([0, 0, 0], [1, 2, 3]);
+      state.setSectionPlaneFromFace([0, 0, 0], 50);
       // Plane unchanged...
       assert.strictEqual(state.sectionPlane.normal, undefined);
-      assert.strictEqual(state.sectionPlane.distance, undefined);
       // ...and pick mode still cleared so the UI doesn't stay armed.
       assert.strictEqual(state.sectionPickMode, false);
     });
   });
 
   describe('setSectionPlaneAxis clears custom plane', () => {
-    it('should drop normal/distance set by face-pick when a preset is chosen', () => {
-      state.setSectionPlaneFromFace([0, 0, 1], [0, 0, 7]);
+    it('should drop the custom normal when a preset is chosen', () => {
+      state.setSectionPlaneFromFace([0, 0, 1], 50);
       assert.ok(state.sectionPlane.normal !== undefined);
       state.setSectionPlaneAxis('down');
       assert.strictEqual(state.sectionPlane.normal, undefined);
-      assert.strictEqual(state.sectionPlane.distance, undefined);
     });
 
-    it('should drop normal/distance when the position slider moves', () => {
-      state.setSectionPlaneFromFace([0, 0, 1], [0, 0, 7]);
+    it('should keep the custom normal when the slider moves so slider offsets the plane', () => {
+      // After face-pick the slider drags the plane along its normal (does NOT
+      // revert to an axis cut). That was the whole point of issue #243:
+      // "slider only works for front/side/down" bug — the custom normal must
+      // survive slider interaction.
+      state.setSectionPlaneFromFace([0, 0, 1], 50);
       state.setSectionPlanePosition(42);
-      assert.strictEqual(state.sectionPlane.normal, undefined);
-      assert.strictEqual(state.sectionPlane.distance, undefined);
+      assert.deepStrictEqual(state.sectionPlane.normal, [0, 0, 1]);
+      assert.strictEqual(state.sectionPlane.position, 42);
     });
   });
 

@@ -127,13 +127,15 @@ export interface SectionSlice {
   resetSectionPlane: () => void;
   /**
    * Set the section plane from a face pick. `normal` is the face's
-   * world-space unit normal; `point` is any point on the face (typically
-   * the raycast intersection). The derived plane equation is
-   * `dot(worldPos, normal) = dot(point, normal)`.
+   * world-space unit normal; `position` is the pre-computed 0-100%
+   * position along the model bounds projected onto `normal` (the caller
+   * is responsible for the projection because the store doesn't know the
+   * current bounds). After the pick the slider offsets the plane along
+   * `normal`.
    */
   setSectionPlaneFromFace: (
     normal: [number, number, number],
-    point: [number, number, number],
+    position: number,
   ) => void;
   setSectionPickMode: (enabled: boolean) => void;
 }
@@ -181,14 +183,13 @@ export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice
   setSectionPlaneAxis: (axis) => set((state) => ({
     // Changing the axis implicitly means "I want to cut now" — enable the clip
     // so users don't get stuck in a confusing no-op preview.
-    // Also drop any custom normal/distance left over from face-pick so the
+    // Also drop any custom normal left over from face-pick so the
     // preset takes over cleanly.
     sectionPlane: {
       ...state.sectionPlane,
       axis,
       enabled: true,
       normal: undefined,
-      distance: undefined,
     },
   })),
 
@@ -198,14 +199,14 @@ export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice
     return {
       // Moving the slider also enables the cut — previously you had to press
       // "Cutting" separately, which led to the "it just jitters, doesn't cut"
-      // feedback from users. Also drop any custom normal/distance so the
-      // slider returns to controlling the axis-aligned preset.
+      // feedback from users. `normal` is preserved: when a custom plane is
+      // active the slider offsets it along its normal (the bounds-projection
+      // range is computed by the renderer), so the slider is the single
+      // source of truth for position regardless of axis-vs-custom.
       sectionPlane: {
         ...state.sectionPlane,
         position: clampedPosition,
         enabled: true,
-        normal: undefined,
-        distance: undefined,
       },
     };
   }),
@@ -253,7 +254,7 @@ export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice
     return { sectionPlane: getDefaultSectionPlane(), sectionPickMode: false };
   }),
 
-  setSectionPlaneFromFace: (normal, point) => set((state) => {
+  setSectionPlaneFromFace: (normal, position) => set((state) => {
     const nx = normal[0];
     const ny = normal[1];
     const nz = normal[2];
@@ -263,13 +264,13 @@ export const createSectionSlice: StateCreator<SectionSlice, [], [], SectionSlice
       return { sectionPickMode: false };
     }
     const unit: [number, number, number] = [nx / len, ny / len, nz / len];
-    const distance = point[0] * unit[0] + point[1] * unit[1] + point[2] * unit[2];
+    const clampedPosition = Math.min(100, Math.max(0, Number(position) || 0));
     return {
       sectionPlane: {
         ...state.sectionPlane,
         axis: nearestCardinalAxis(unit),
         normal: unit,
-        distance,
+        position: clampedPosition,
         enabled: true,
       },
       sectionPickMode: false,

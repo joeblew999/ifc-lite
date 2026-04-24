@@ -6,13 +6,16 @@
  * Section plane controls panel
  */
 
-import React, { useCallback, useState } from 'react';
-import { X, Slice, ChevronDown, FileImage, FlipHorizontal2, MousePointerClick } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { X, Slice, ChevronDown, FileImage, FlipHorizontal2, MousePointerClick, GripVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useViewerStore } from '@/store';
 import { AXIS_INFO } from './sectionConstants';
 import { SectionPlaneVisualization } from './SectionVisualization';
 import { SectionCapControls } from './SectionCapControls';
+
+// Visible margin so the panel can't be dragged fully off the 3D canvas.
+const PANEL_DRAG_MARGIN_PX = 8;
 
 export function SectionOverlay() {
   const sectionPlane = useViewerStore((s) => s.sectionPlane);
@@ -27,7 +30,95 @@ export function SectionOverlay() {
   const drawingPanelVisible = useViewerStore((s) => s.drawing2DPanelVisible);
   const clearDrawing = useViewerStore((s) => s.clearDrawing2D);
   const [isPanelCollapsed, setIsPanelCollapsed] = useState(true);
-  const isCustomPlane = sectionPlane.normal !== undefined && sectionPlane.distance !== undefined;
+  const isCustomPlane = sectionPlane.normal !== undefined;
+
+  // Draggable panel state. `panelPos` is null until the user drags, at which
+  // point we switch from the CSS-centred default to explicit pixel offsets
+  // inside the 3D-area parent element.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [panelPos, setPanelPos] = useState<{ x: number; y: number } | null>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startPx: { x: number; y: number };
+    startPy: { x: number; y: number };
+    rectW: number;
+    rectH: number;
+  } | null>(null);
+
+  // Clamp the stored position back inside the parent rect on resize so a
+  // panel dragged near the edge doesn't float off-screen when the viewport
+  // shrinks (window resize, drawing panel opening, etc.).
+  useEffect(() => {
+    if (!panelPos) return;
+    const el = panelRef.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    const panelRect = el.getBoundingClientRect();
+    const maxX = Math.max(PANEL_DRAG_MARGIN_PX, parentRect.width - panelRect.width - PANEL_DRAG_MARGIN_PX);
+    const maxY = Math.max(PANEL_DRAG_MARGIN_PX, parentRect.height - panelRect.height - PANEL_DRAG_MARGIN_PX);
+    const clamped = {
+      x: Math.min(maxX, Math.max(PANEL_DRAG_MARGIN_PX, panelPos.x)),
+      y: Math.min(maxY, Math.max(PANEL_DRAG_MARGIN_PX, panelPos.y)),
+    };
+    if (clamped.x !== panelPos.x || clamped.y !== panelPos.y) {
+      setPanelPos(clamped);
+    }
+    // We intentionally do NOT depend on panelPos here to avoid a feedback loop;
+    // this runs whenever panelPos changes (React's normal effect schedule) and
+    // the clamp is idempotent.
+
+  }, [panelPos]);
+
+  const handleDragPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // Only left-button drags; ignore right-click, touch pan, etc.
+    if (e.button !== 0) return;
+    const el = panelRef.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    const panelRect = el.getBoundingClientRect();
+    const startPy = {
+      x: panelRect.left - parentRect.left,
+      y: panelRect.top - parentRect.top,
+    };
+    dragStateRef.current = {
+      pointerId: e.pointerId,
+      startPx: { x: e.clientX, y: e.clientY },
+      startPy,
+      rectW: parentRect.width,
+      rectH: parentRect.height,
+    };
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+    // Seed explicit position so subsequent pointermove updates are absolute,
+    // not relative to the CSS-centred default.
+    setPanelPos(startPy);
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDragPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const dx = e.clientX - drag.startPx.x;
+    const dy = e.clientY - drag.startPx.y;
+    const panelRect = el.getBoundingClientRect();
+    const maxX = Math.max(PANEL_DRAG_MARGIN_PX, drag.rectW - panelRect.width - PANEL_DRAG_MARGIN_PX);
+    const maxY = Math.max(PANEL_DRAG_MARGIN_PX, drag.rectH - panelRect.height - PANEL_DRAG_MARGIN_PX);
+    setPanelPos({
+      x: Math.min(maxX, Math.max(PANEL_DRAG_MARGIN_PX, drag.startPy.x + dx)),
+      y: Math.min(maxY, Math.max(PANEL_DRAG_MARGIN_PX, drag.startPy.y + dy)),
+    });
+  }, []);
+
+  const handleDragPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    dragStateRef.current = null;
+  }, []);
 
   const handleClose = useCallback(() => {
     setActiveTool('select');
@@ -63,10 +154,32 @@ export function SectionOverlay() {
 
   return (
     <>
-      {/* Compact Section Tool Panel - matches Measure tool style */}
-      <div className="pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 bg-background/95 backdrop-blur-sm rounded-lg border shadow-lg z-30">
+      {/* Compact Section Tool Panel - matches Measure tool style.
+          Draggable within its parent (the 3D canvas area) via the grip on
+          the header. Until first dragged the panel sits in the default
+          centred position; `panelPos` flips it to explicit pixel offsets
+          after the first drag. */}
+      <div
+        ref={panelRef}
+        className={
+          panelPos === null
+            ? "pointer-events-auto absolute top-4 left-1/2 -translate-x-1/2 bg-background/95 backdrop-blur-sm rounded-lg border shadow-lg z-30"
+            : "pointer-events-auto absolute bg-background/95 backdrop-blur-sm rounded-lg border shadow-lg z-30"
+        }
+        style={panelPos === null ? undefined : { top: `${panelPos.y}px`, left: `${panelPos.x}px` }}
+      >
         {/* Header - always visible */}
         <div className="flex items-center justify-between gap-2 p-2">
+          <div
+            className="flex items-center text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing select-none touch-none"
+            title="Drag to move panel"
+            onPointerDown={handleDragPointerDown}
+            onPointerMove={handleDragPointerMove}
+            onPointerUp={handleDragPointerUp}
+            onPointerCancel={handleDragPointerUp}
+          >
+            <GripVertical className="h-4 w-4" />
+          </div>
           <button
             onClick={togglePanel}
             className="flex items-center gap-2 hover:bg-accent/50 rounded px-2 py-1 transition-colors"
@@ -75,7 +188,8 @@ export function SectionOverlay() {
             <span className="font-medium text-sm">Section</span>
             {sectionPlane.enabled && (
               <span className="text-xs text-primary font-mono">
-                {AXIS_INFO[sectionPlane.axis].label} <span className="inline-block w-12 text-right tabular-nums">{sectionPlane.position.toFixed(1)}%</span>
+                {isCustomPlane ? 'Custom' : AXIS_INFO[sectionPlane.axis].label}{' '}
+                <span className="inline-block w-12 text-right tabular-nums">{sectionPlane.position.toFixed(1)}%</span>
               </span>
             )}
             <ChevronDown className={`h-3 w-3 transition-transform ${isPanelCollapsed ? '-rotate-90' : ''}`} />
@@ -200,7 +314,7 @@ export function SectionOverlay() {
       >
         <span className="font-mono text-xs uppercase tracking-wide">
           {sectionPlane.enabled
-            ? `Cut ${AXIS_INFO[sectionPlane.axis].label.toLowerCase()} at ${sectionPlane.position.toFixed(1)}%${sectionPlane.flipped ? ' (flipped)' : ''}`
+            ? `Cut ${isCustomPlane ? 'custom' : AXIS_INFO[sectionPlane.axis].label.toLowerCase()} at ${sectionPlane.position.toFixed(1)}%${sectionPlane.flipped ? ' (flipped)' : ''}`
             : 'Clip off — drag slider to cut'}
         </span>
       </div>

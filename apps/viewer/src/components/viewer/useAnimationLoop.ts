@@ -181,10 +181,11 @@ export function useAnimationLoop(params: UseAnimationLoopParams): void {
             capStyle: sectionPlaneRef.current.capStyle,
             min: sectionRangeRef.current?.min,
             max: sectionRangeRef.current?.max,
-            // Face-pick overrides — when set, the renderer uses these
-            // verbatim and ignores axis/position/min/max.
+            // Face-pick: when `normal` is set the renderer projects the
+            // model bounds onto it and uses `position` (above) to interpolate
+            // the plane distance along that range, so the slider still
+            // drives the offset.
             normal: sectionPlaneRef.current.normal,
-            distance: sectionPlaneRef.current.distance,
           } : undefined,
           terrainClipY: terrainClipYRef.current ?? undefined,
         });

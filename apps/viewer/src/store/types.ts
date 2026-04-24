@@ -94,20 +94,21 @@ import type { SectionCapStyle } from '@ifc-lite/renderer';
 
 export interface SectionPlane {
   axis: SectionPlaneAxis;
-  /** 0-100 percentage of model bounds */
+  /** 0-100 percentage of the active range. For axis presets this is the range
+   * along the cardinal axis; for custom planes (face-pick) it is the range of
+   * the model bounds projected onto the plane normal, so the slider continues
+   * to translate the plane naturally. */
   position: number;
   enabled: boolean;
   /** If true, show the opposite side of the cut */
   flipped: boolean;
   /**
-   * Optional world-space plane normal. When set (together with `distance`) the
-   * renderer uses it verbatim and ignores `axis` + `position`. Used by
-   * face-pick to support arbitrary planes while keeping `axis` populated with
-   * the nearest cardinal so downstream readers (drawings, BCF) still work.
+   * Optional world-space plane normal. When set, the renderer uses it and the
+   * `position` slider maps to the bounds-projection range along this normal,
+   * ignoring `axis`. `axis` is still populated with the nearest cardinal so
+   * downstream readers (drawings, BCF) keep working.
    */
   normal?: [number, number, number];
-  /** Signed plane offset in world units: `dot(pointOnPlane, normal)`. */
-  distance?: number;
   /** Whether to render the filled, hatched cap surface at the plane. Defaults to true. */
   showCap: boolean;
   /**

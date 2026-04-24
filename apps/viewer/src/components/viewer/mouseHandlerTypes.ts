@@ -60,10 +60,11 @@ export interface MouseHandlerContext {
    * existing callers that don't care about section face-pick don't have to
    * thread it through. */
   sectionPickModeRef?: MutableRefObject<boolean>;
-  /** Action: set plane through a world-space face. */
+  /** Action: set plane through a world-space face. `position` is already
+   * projected into 0-100% along the model bounds along the normal. */
   setSectionPlaneFromFace?: (
     normal: [number, number, number],
-    point: [number, number, number],
+    position: number,
   ) => void;
   /** Action: arm/disarm face-pick mode. */
   setSectionPickMode?: (enabled: boolean) => void;

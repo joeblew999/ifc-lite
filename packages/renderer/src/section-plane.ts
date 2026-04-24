@@ -21,13 +21,14 @@ export interface SectionPlaneRenderOptions {
   min?: number;      // Optional override for min range value
   max?: number;      // Optional override for max range value
   /**
-   * Optional explicit plane normal (unit vector) and signed distance from
-   * origin. When both are provided, the gizmo is placed on that world-space
-   * plane and its quad is built from an orthonormal basis derived from the
-   * normal — `axis`/`position`/`min`/`max` are ignored.
+   * Optional world-space plane normal (unit vector). When provided, the
+   * gizmo is placed on the plane whose distance from origin is derived
+   * from the model bounds projected onto `normal`, interpolated by
+   * `position` (0-100%). `axis`/`min`/`max` are ignored for this path.
+   * This mirrors the computation the main renderer does for its shader
+   * clip so the gizmo and the cut stay in lockstep.
    */
   normal?: [number, number, number];
-  distance?: number;
 }
 
 export class SectionPlaneRenderer {
@@ -265,20 +266,17 @@ export class SectionPlaneRenderer {
       return;
     }
 
-    const { axis, position, bounds, viewProj, isPreview, min: minOverride, max: maxOverride, normal, distance } = options;
+    const { axis, position, bounds, viewProj, isPreview, min: minOverride, max: maxOverride, normal } = options;
 
     // Only draw section plane in preview mode - hide it during active cutting
     if (!isPreview) {
       return;
     }
 
-    const hasExplicitPlane =
-      normal !== undefined &&
-      distance !== undefined &&
-      Number.isFinite(distance);
+    const hasExplicitPlane = normal !== undefined;
 
     const vertices = hasExplicitPlane
-      ? this.calculatePlaneVerticesFromNormal(normal!, distance!, bounds)
+      ? this.calculatePlaneVerticesFromNormal(normal!, position, bounds)
       : this.calculatePlaneVertices(axis, position, bounds, 0, minOverride, maxOverride);
     this.device.queue.writeBuffer(this.vertexBuffer, 0, vertices);
 
@@ -401,15 +399,17 @@ export class SectionPlaneRenderer {
 
   /**
    * Compute 6 vertices (two triangles) for the visualization quad of an
-   * arbitrary plane defined by a world-space unit normal and signed distance
-   * from origin (plane equation: `dot(p, n) = d`). The quad is centred on the
-   * foot of the perpendicular from the bounds centre, oriented via an
-   * orthonormal basis derived from the normal, and sized from the bounds'
-   * diagonal so it visibly covers the model no matter how the plane is tilted.
+   * arbitrary plane defined by a world-space unit normal, where `position`
+   * (0-100%) picks the distance along the range of the bounds projected
+   * onto `normal` — this is the same mapping the main renderer does for
+   * its shader clip, so the gizmo and the cut stay in lockstep while the
+   * slider is dragged. The quad is centred on the foot of the perpendicular
+   * from the bounds centre and oriented via an orthonormal basis derived
+   * from the normal so it stays visible at any tilt.
    */
   private calculatePlaneVerticesFromNormal(
     normal: [number, number, number],
-    distance: number,
+    position: number,
     bounds: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }
   ): Float32Array {
     const { min, max } = bounds;
@@ -425,7 +425,25 @@ export class SectionPlaneRenderer {
       return new Float32Array(30); // degenerate; draw nothing
     }
     nx /= nlen; ny /= nlen; nz /= nlen;
-    const d = distance / nlen;
+
+    // Project the 8 AABB corners onto the unit normal to get the valid
+    // distance range, then interpolate via `position` (0-100%). Matches
+    // the main renderer's mapping so the gizmo sits exactly on the clip.
+    let minP = Infinity;
+    let maxP = -Infinity;
+    for (const cx of [min.x, max.x]) {
+      for (const cy of [min.y, max.y]) {
+        for (const cz of [min.z, max.z]) {
+          const pr = cx * nx + cy * ny + cz * nz;
+          if (pr < minP) minP = pr;
+          if (pr > maxP) maxP = pr;
+        }
+      }
+    }
+    const rng = maxP - minP;
+    const d = rng > 1e-6
+      ? minP + (Math.min(100, Math.max(0, position)) / 100) * rng
+      : minP;
 
     // Foot of the perpendicular from the bounds centre projected onto the
     // plane — keeps the gizmo anchored near the model even when the plane

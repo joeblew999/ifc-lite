@@ -37,10 +37,39 @@ export async function handleSelectionClick(ctx: MouseHandlerContext, e: MouseEve
     if (hit?.intersection) {
       const n = hit.intersection.normal;
       const p = hit.intersection.point;
-      ctx.setSectionPlaneFromFace?.(
-        [n.x, n.y, n.z],
-        [p.x, p.y, p.z],
-      );
+      // Normalise and project the pick point into 0-100% along the
+      // model's bounds projected onto the plane normal — this is what
+      // the position slider drives, so after the pick dragging the
+      // slider offsets the plane along its normal continuously.
+      const nlen = Math.sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      if (nlen > 1e-6) {
+        const nx = n.x / nlen;
+        const ny = n.y / nlen;
+        const nz = n.z / nlen;
+        const bounds = renderer.getModelBounds();
+        let position = 50;
+        if (bounds) {
+          let minP = Infinity;
+          let maxP = -Infinity;
+          for (const cx of [bounds.min.x, bounds.max.x]) {
+            for (const cy of [bounds.min.y, bounds.max.y]) {
+              for (const cz of [bounds.min.z, bounds.max.z]) {
+                const proj = cx * nx + cy * ny + cz * nz;
+                if (proj < minP) minP = proj;
+                if (proj > maxP) maxP = proj;
+              }
+            }
+          }
+          const pickProj = p.x * nx + p.y * ny + p.z * nz;
+          const range = maxP - minP;
+          if (range > 1e-6) {
+            position = Math.min(100, Math.max(0, ((pickProj - minP) / range) * 100));
+          }
+        }
+        ctx.setSectionPlaneFromFace?.([nx, ny, nz], position);
+      } else {
+        ctx.setSectionPickMode?.(false);
+      }
     } else {
       // Missed geometry — cancel the arm so the user isn't stuck in pick
       // mode after an errant background click.

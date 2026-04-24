@@ -864,16 +864,14 @@ export class Renderer {
                 }
 
                 if (options.sectionPlane.enabled) {
-                    // Explicit normal + distance override (face-pick / arbitrary
-                    // plane). Used verbatim: no axis mapping, no position slider,
-                    // no building rotation — the caller already has the plane in
-                    // world space.
+                    // Custom-plane path (face-pick): caller supplies a
+                    // world-space normal; `position` (0-100%) maps onto the
+                    // range of the model bounds projected onto that normal,
+                    // so the slider translates the plane along its own normal
+                    // continuously. No axis mapping, no building rotation —
+                    // the caller already chose the plane in world space.
                     const explicitNormal = options.sectionPlane.normal;
-                    const explicitDistance = options.sectionPlane.distance;
-                    const hasExplicitPlane =
-                        explicitNormal !== undefined &&
-                        explicitDistance !== undefined &&
-                        Number.isFinite(explicitDistance);
+                    const hasExplicitPlane = explicitNormal !== undefined;
 
                     let normal: [number, number, number];
                     let distance: number;
@@ -886,11 +884,27 @@ export class Renderer {
                         const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
                         if (len > 1e-6) {
                             normal = [nx / len, ny / len, nz / len];
-                            distance = explicitDistance! / len;
                         } else {
                             normal = [0, 1, 0];
-                            distance = explicitDistance!;
                         }
+                        // Project the 8 AABB corners onto the (unit) normal
+                        // to get the valid distance range, then interpolate
+                        // via `position`.
+                        let minP = Infinity;
+                        let maxP = -Infinity;
+                        for (const cx of [boundsMin.x, boundsMax.x]) {
+                            for (const cy of [boundsMin.y, boundsMax.y]) {
+                                for (const cz of [boundsMin.z, boundsMax.z]) {
+                                    const pr = cx * normal[0] + cy * normal[1] + cz * normal[2];
+                                    if (pr < minP) minP = pr;
+                                    if (pr > maxP) maxP = pr;
+                                }
+                            }
+                        }
+                        const range = maxP - minP;
+                        distance = range > 1e-6
+                            ? minP + (options.sectionPlane.position / 100) * range
+                            : minP;
                     } else {
                         // Axis-aligned preset path (unchanged behaviour).
                         // down = Y axis (horizontal cut), front = Z axis, side = X axis.
@@ -1518,7 +1532,6 @@ export class Renderer {
                         min: options.sectionPlane.min,
                         max: options.sectionPlane.max,
                         normal: options.sectionPlane.normal,
-                        distance: options.sectionPlane.distance,
                     }
                 );
 
