@@ -37,6 +37,7 @@ import { createDesktopEntitlementSlice, type DesktopEntitlementSlice } from './s
 import { createScheduleSlice, type ScheduleSlice } from './slices/scheduleSlice.js';
 import { createPlaybackSlice, type PlaybackSlice } from './slices/playbackSlice.js';
 import { createOverlaySlice, type OverlaySlice } from './slices/overlaySlice.js';
+import { createSearchSlice, type SearchSlice } from './slices/searchSlice.js';
 import { invalidateVisibleBasketCache } from './basketVisibleSet.js';
 
 // Import constants for reset function
@@ -126,7 +127,8 @@ export type ViewerState = LoadingSlice &
   DesktopEntitlementSlice &
   ScheduleSlice &
   PlaybackSlice &
-  OverlaySlice & {
+  OverlaySlice &
+  SearchSlice & {
     resetViewerState: () => void;
   };
 
@@ -160,6 +162,7 @@ const createViewerStore = () => create<ViewerState>()((...args) => ({
   ...createScheduleSlice(...args),
   ...createPlaybackSlice(...args),
   ...createOverlaySlice(...args),
+  ...createSearchSlice(...args),
 
   // Reset all viewer state when loading new file
   // Note: Does NOT clear models - use clearAllModels() for that
@@ -385,6 +388,11 @@ const createViewerStore = () => create<ViewerState>()((...args) => ({
       redoStacks: new Map(),
       dirtyModels: new Set(),
       mutationVersion: get().mutationVersion + 1,
+
+      // Search - results reference the previous model's expressIds, drop them.
+      searchQuery: '',
+      searchOpen: false,
+      searchHighlightIndex: 0,
     });
   },
 }));

@@ -67,6 +67,7 @@ import { ExportDialog } from './ExportDialog';
 import { BulkPropertyEditor } from './BulkPropertyEditor';
 import { DataConnector } from './DataConnector';
 import { ExportChangesButton } from './ExportChangesButton';
+import { SearchInline } from './SearchInline';
 // CesiumSettingsDialog removed — settings now shown as overlay on Cesium viewer
 import { useFloorplanView } from '@/hooks/useFloorplanView';
 import { buildDesktopUpgradeUrl, hasDesktopFeatureAccess, type DesktopFeature } from '@/lib/desktop-product';
@@ -1033,6 +1034,11 @@ export function MainToolbar({ onShowShortcuts }: MainToolbarProps = {} as MainTo
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Separator orientation="vertical" className="h-6 mx-1" />
+
+      {/* ── Search (Tier-0 inline; ⌘F or / to focus) ── */}
+      <SearchInline />
 
       <Separator orientation="vertical" className="h-6 mx-1" />
 
