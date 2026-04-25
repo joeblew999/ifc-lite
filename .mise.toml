@@ -82,10 +82,18 @@ DOPPLER_DISABLE_UPDATE_CHECK = "1"
 description = "Install JS dependencies"
 run = "corepack enable && pnpm install"
 
+[tasks."rust:components"]
+description = "Ensure rust-toolchain.toml components/targets are installed (idempotent)"
+run = """
+rustup show active-toolchain >/dev/null 2>&1 || rustup show
+rustup component add rust-src --toolchain nightly-2025-11-15
+rustup target add wasm32-unknown-unknown --toolchain nightly-2025-11-15
+"""
+
 [tasks.wasm]
 description = "Build Rust WASM bindings"
 run = "bash scripts/build-wasm.sh"
-depends = ["install"]
+depends = ["install", "rust:components"]
 
 [tasks.build]
 description = "Build all packages (WASM + TS)"

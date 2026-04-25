@@ -85,20 +85,10 @@ jobs:
           install: true
           cache: true
 
-      # mise-action caches mise's own state but NOT ~/.rustup/toolchains.
-      # On cache hits, rustup may restore the toolchain dir without the
-      # rust-src component (which build-std needs to compile std from source).
-      # Explicit `rustup component add` is idempotent and ensures both the
-      # component and target are present regardless of cache state.
-      - name: Ensure rust toolchain components are present
-        if: steps.gate.outputs.run == 'true'
-        run: |
-          rustup show active-toolchain || rustup show
-          rustup component add rust-src --toolchain nightly-2025-11-15
-          rustup target add wasm32-unknown-unknown --toolchain nightly-2025-11-15
-
-      # mise tasks delegate to package.json / Cargo.toml — same commands run
-      # locally via `mise run deploy:web`.
+      # NOTE on SSOT: rust-src + wasm32 component installation lives in the
+      # `rust:components` mise task (.mise.toml). The `wasm` task depends on
+      # it, so `mise run deploy:web` (below) handles toolchain prep itself —
+      # no rustup commands needed in CI.
       - name: Deploy ${{ matrix.app }}
         if: steps.gate.outputs.run == 'true'
         env:
