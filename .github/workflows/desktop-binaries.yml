@@ -128,8 +128,12 @@ jobs:
       #   - cargo build of src-tauri
       #   - platform bundler (.dmg / .msi / .AppImage + .deb)
       # And attaches the bundles to the triggering release if any.
+      # Pin to a specific tag — tauri-apps/tauri-action@v0 (the major alias)
+      # bundles JS with a top-level await that fails on Node 22 mise installs:
+      # "Detected unsettled top-level await ... __webpack_exports__ = await ...".
+      # Bumping to action-v0.6.2 picks up the Node-22-compatible build.
       - name: Build & bundle desktop app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@action-v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Optional code-signing secrets — if absent, builds are unsigned
