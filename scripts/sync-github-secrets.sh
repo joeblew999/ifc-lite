@@ -17,11 +17,14 @@
 #   bash scripts/sync-github-secrets.sh --dry-run        # show plan only
 set -euo pipefail
 
-REPO_ARG=()
+# Default to the fork (joeblew999) — `gh` resolves to upstream (louistrue) when
+# a fork relationship exists, which is wrong for our workflows. Override with
+# --repo if you actually want to target a different repo.
+REPO="${GITHUB_REPO:-joeblew999/ifc-lite}"
 DRY_RUN=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo) REPO_ARG=(--repo "$2"); shift 2 ;;
+    --repo) REPO="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help)
       sed -n '1,/^set -/p' "$0" | sed 's/^# \{0,1\}//' | head -n -1
@@ -57,11 +60,7 @@ command -v gh >/dev/null || { echo "gh CLI not installed" >&2; exit 1; }
 
 # Show what we're about to do.
 echo "Syncing $(( ${#MAPPING[@]} )) secrets from Doppler → GitHub..."
-if [[ ${#REPO_ARG[@]} -gt 0 ]]; then
-  echo "  Target repo: ${REPO_ARG[1]}"
-else
-  echo "  Target repo: $(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo '(gh default)')"
-fi
+echo "  Target repo: $REPO"
 proj="${DOPPLER_PROJECT:-$(doppler configure get project --plain 2>/dev/null || echo '(default)')}"
 cfg="${DOPPLER_CONFIG:-$(doppler configure get config --plain 2>/dev/null || echo '(default)')}"
 echo "  Doppler:     project=$proj config=$cfg"
@@ -82,7 +81,7 @@ for entry in "${MAPPING[@]}"; do
     if $DRY_RUN; then
       echo "  ✓ $dkey → $gkey  (dry-run, would set ${#value} bytes)"
     else
-      if printf '%s' "$value" | gh secret set "$gkey" "${REPO_ARG[@]}" --body - >/dev/null 2>&1; then
+      if printf '%s' "$value" | gh secret set "$gkey" --repo "$REPO" --body - >/dev/null 2>&1; then
         echo "  ✓ $dkey → $gkey  (${#value} bytes)"
         ok=$((ok+1))
       else
