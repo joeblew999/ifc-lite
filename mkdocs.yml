@@ -111,6 +111,7 @@ extra_javascript:
 nav:
   - Home: index.md
   - Getting Started:
+    - Run IFClite: guide/run.md
     - Installation: guide/installation.md
     - Quick Start: guide/quickstart.md
     - CLI Toolkit: guide/cli.md

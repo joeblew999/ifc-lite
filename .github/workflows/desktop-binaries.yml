@@ -1,0 +1,155 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Builds the Tauri desktop app (apps/desktop) for macOS (universal),
+# Windows (x64) and Linux (x64). PR runs are validation-only; pushes to
+# main upload artifacts; published GitHub Releases attach the bundles
+# (.dmg / .msi / .AppImage / .deb) to the release.
+#
+# Companion to .github/workflows/server-binaries.yml — same trigger model,
+# same release-attachment behaviour, different artifact (GUI app vs server
+# binary). Together they cover every native target users might want.
+
+name: Desktop Binaries
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desktop-binaries.yml'
+      - 'apps/desktop/**'
+      - 'packages/wasm/**'
+      - 'rust/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-binaries.yml'
+      - 'apps/desktop/**'
+      - 'packages/wasm/**'
+      - 'rust/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'rust-toolchain.toml'
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  build-desktop:
+    name: Build desktop (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write     # needed for release upload
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-universal
+            os: macos-14
+            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
+            tauri-args: '--target universal-apple-darwin'
+          - target: windows-x64
+            os: windows-latest
+            rust-targets: 'x86_64-pc-windows-msvc'
+            tauri-args: '--target x86_64-pc-windows-msvc'
+          - target: linux-x64
+            os: ubuntu-22.04
+            rust-targets: 'x86_64-unknown-linux-gnu'
+            tauri-args: '--target x86_64-unknown-linux-gnu'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      # Tauri's webview / bundling deps. macOS and Windows have what they need
+      # in the runner image already; only Linux needs apt installs.
+      - name: Install Linux Tauri deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: 'latest'
+
+      - name: Install JS deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Build WASM bindings
+        run: bash scripts/build-wasm.sh
+
+      - name: Build shared TS packages
+        run: pnpm build
+
+      # Tauri-action drives the whole bundle pipeline:
+      #   - vite build of the desktop frontend
+      #   - cargo build of src-tauri
+      #   - platform bundler (.dmg / .msi / .AppImage + .deb)
+      # And attaches the bundles to the triggering release if any.
+      - name: Build & bundle desktop app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional code-signing secrets — if absent, builds are unsigned
+          # (functional, but macOS/Windows show "unidentified developer").
+          # Add via repo Settings → Secrets to enable signing.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
+          releaseName: ${{ github.event_name == 'release' && github.event.release.name || '' }}
+          releaseId: ${{ github.event_name == 'release' && github.event.release.id || '' }}
+          args: ${{ matrix.tauri-args }}
+
+      # For non-release runs, save artifacts so PRs can be downloaded.
+      - name: Upload bundles (PR / push)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ifc-lite-desktop-${{ matrix.target }}
+          path: |
+            apps/desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/*/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/*/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/*/release/bundle/deb/*.deb
+          if-no-files-found: warn
