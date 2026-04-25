@@ -62,11 +62,11 @@ rust = "nightly-2025-11-15"
 "cargo:wasm-pack" = "latest"
 "npm:turbo" = "2"
 # Process supervisor for dev:all (web + server together)
-"aqua:jdx/pitchfork" = "latest"
+"aqua:jdx/pitchfork" = "2"
 # Cloudflare CLI for deploy:web / deploy:embed
 "npm:wrangler" = "4"
 # Doppler CLI for secrets:* (sync from Doppler → GitHub Actions secrets)
-"github:DopplerHQ/cli" = "latest"
+"github:DopplerHQ/cli" = "3"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
