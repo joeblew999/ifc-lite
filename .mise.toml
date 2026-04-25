@@ -75,10 +75,14 @@ rust = "nightly-2025-11-15"
 [env]
 # pnpm is managed via corepack (bundled with node)
 
-# fnox: SSH key as the age decryption identity. The matching public key is
-# the recipient in ~/.config/fnox/config.toml. fnox is invoked via mise so
-# this env var is automatically present anywhere mise is active.
-FNOX_AGE_KEY_FILE = "~/.ssh/id_ed25519"
+# fnox: dedicated age private key, stored in macOS Keychain.
+#   - service=fnox account=age-key
+#   - Pulled on every mise activation via the security CLI
+#   - Decoupled from your SSH key (independent rotation, separate compromise
+#     surface). If you `security delete-generic-password -s fnox`, fnox loses
+#     the ability to decrypt — same as losing any key file.
+# Public key (the recipient) is in ~/.config/fnox/config.toml.
+FNOX_AGE_KEY = "{{exec(command='security find-generic-password -s fnox -a age-key -w')}}"
 
 [tasks.install]
 description = "Install JS dependencies"
@@ -202,6 +206,7 @@ description = "Deploy every CF target (web + embed). Server is NOT on CF — see
 depends = ["deploy:web", "deploy:embed"]
 
 # ---- Secrets (fnox → GitHub Actions) ----
+# https://fnox.jdx.dev
 # fnox is the local source of truth, backed by macOS Keychain via the
 # global `~/.config/fnox/config.toml`. These mise tasks render fnox's
 # values into GitHub repo Actions secrets so CI workflows can read them.
