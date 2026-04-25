@@ -65,6 +65,8 @@ rust = "nightly-2025-11-15"
 "aqua:jdx/pitchfork" = "latest"
 # Cloudflare CLI for deploy:web / deploy:embed
 "npm:wrangler" = "4"
+# Doppler CLI for secrets:* (sync from Doppler → GitHub Actions secrets)
+"github:DopplerHQ/cli" = "latest"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
@@ -181,6 +183,39 @@ run = "wrangler deploy"
 [tasks."deploy:all"]
 description = "Deploy every CF target (web + embed). Server is NOT on CF — see top of file."
 depends = ["deploy:web", "deploy:embed"]
+
+# ---- Secrets (Doppler → GitHub Actions) ----
+# Doppler is the SSOT for secrets locally; these tasks push them into GitHub
+# repo secrets so workflows (cloudflare-deploy*.yml, desktop-binaries.yml) can
+# read them. Run `doppler login` and `doppler setup` once in this directory
+# to point the CLI at the right project/config.
+
+[tasks."secrets:list"]
+description = "Show the canonical secret list (Doppler key → GitHub secret name)"
+run = """
+echo "Defined in scripts/sync-github-secrets.sh MAPPING table:"
+grep -E '^\\s+"[A-Z_]+\\s+[A-Z_]+"' scripts/sync-github-secrets.sh | sed 's/^/  /'
+echo
+echo "Uncomment any optional rows in scripts/sync-github-secrets.sh to enable signing."
+"""
+
+[tasks."secrets:status"]
+description = "Compare Doppler secrets vs GitHub repo secrets (read-only)"
+run = """
+echo "== Doppler =="
+doppler secrets --only-names 2>/dev/null || echo "  (run: doppler login && doppler setup)"
+echo
+echo "== GitHub repo secrets =="
+gh secret list 2>/dev/null || echo "  (run: gh auth login)"
+"""
+
+[tasks."secrets:sync-github"]
+description = "Push secrets from Doppler → GitHub Actions repo secrets"
+run = "bash scripts/sync-github-secrets.sh"
+
+[tasks."secrets:sync-github-dry"]
+description = "Dry-run of secrets:sync-github (show plan, change nothing)"
+run = "bash scripts/sync-github-secrets.sh --dry-run"
 
 [tasks."deploy:status"]
 description = "Print deployed URLs and check they're live"

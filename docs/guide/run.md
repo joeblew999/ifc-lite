@@ -128,6 +128,27 @@ Then `mise run deploy:web` republishes to the same Cloudflare Worker, now server
 
 ---
 
+## Secrets (Doppler → GitHub)
+
+CI workflows (`cloudflare-deploy*.yml`, `desktop-binaries.yml`) read secrets from GitHub Actions secrets. The canonical store is **Doppler**; a mise task syncs Doppler → GitHub so you don't manually paste tokens into the GitHub UI.
+
+```bash
+# One-time setup
+doppler login              # auth Doppler CLI to your account
+doppler setup              # pick project + config for this directory
+gh auth login              # auth gh CLI to GitHub
+
+# Inspect
+mise run secrets:list             # what's in the mapping table
+mise run secrets:status           # Doppler keys vs GitHub repo secrets
+mise run secrets:sync-github-dry  # dry-run the sync
+
+# Push
+mise run secrets:sync-github      # Doppler → GitHub repo Actions secrets
+```
+
+The mapping (Doppler key → GitHub secret name) lives in [`scripts/sync-github-secrets.sh`](https://github.com/joeblew999/ifc-lite/blob/main/scripts/sync-github-secrets.sh). Add lines as new workflows need new secrets. Optional desktop signing secrets (Apple cert, Tauri key) are commented out — uncomment when you have them in Doppler.
+
 ## Local "everything running together"
 
 For development or when running both viewer and server on one machine:

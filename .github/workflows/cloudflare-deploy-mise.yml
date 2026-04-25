@@ -1,0 +1,95 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+# Parallel Cloudflare-deploy workflow that uses mise as the single source of
+# truth for tools and tasks (.mise.toml). No setup-node / setup-rust steps —
+# every tool version comes from the same `[tools]` table dev uses locally.
+#
+# Compare runs against cloudflare-deploy.yml. If this passes consistently,
+# the original can be retired and this becomes the canonical workflow.
+#
+# Required repo secrets (sync from Doppler with: mise run secrets:sync-github):
+#   CLOUDFLARE_API_TOKEN
+#   CLOUDFLARE_ACCOUNT_ID
+
+name: Cloudflare Deploy (mise)
+
+on:
+  push:
+    branches:
+      - main
+      - cloudflare/deploy
+    paths:
+      - 'apps/viewer/**'
+      - 'apps/viewer-embed/**'
+      - 'packages/**'
+      - 'rust/**'
+      - '.mise.toml'
+      - '.github/workflows/cloudflare-deploy-mise.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which app to deploy'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - web
+          - embed
+
+concurrency:
+  group: cloudflare-deploy-mise-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy ${{ matrix.app }} (via mise)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: web
+            mise_task: deploy:web
+          - app: embed
+            mise_task: deploy:embed
+
+    steps:
+      - name: Skip if dispatch target excludes this app
+        id: gate
+        run: |
+          target='${{ github.event.inputs.target }}'
+          app='${{ matrix.app }}'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$target" != "all" ] && [ "$target" != "$app" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      # The single source of truth: install every tool declared in .mise.toml
+      # (node, rust, wasm-pack, turbo, wrangler, pitchfork, doppler).
+      - name: Setup mise
+        if: steps.gate.outputs.run == 'true'
+        uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      # mise tasks delegate to package.json / Cargo.toml — same commands run
+      # locally via `mise run deploy:web`.
+      - name: Deploy ${{ matrix.app }}
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: mise run ${{ matrix.mise_task }}
