@@ -89,12 +89,11 @@ description = "Install JS dependencies"
 run = "corepack enable && pnpm install"
 
 [tasks."rust:components"]
-description = "Ensure rust-toolchain.toml components/targets are installed (idempotent)"
-run = """
-rustup show active-toolchain >/dev/null 2>&1 || rustup show
-rustup component add rust-src --toolchain nightly-2025-11-15
-rustup target add wasm32-unknown-unknown --toolchain nightly-2025-11-15
-"""
+description = "Ensure rust-toolchain.toml components/targets are installed (idempotent, cross-shell)"
+# One-liner: works in bash AND cmd.exe (no heredoc, no >/dev/null redirects).
+# `rustup show` is idempotent and reads rust-toolchain.toml; the explicit
+# component/target adds are belt-and-braces for cache-restore cases.
+run = "rustup show && rustup component add rust-src --toolchain nightly-2025-11-15 && rustup target add wasm32-unknown-unknown --toolchain nightly-2025-11-15"
 
 [tasks.wasm]
 description = "Build Rust WASM bindings"

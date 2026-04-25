@@ -51,10 +51,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macos-14 ran OOM (exit 137) bundling the viewer's cesium chunk;
-          # macos-14-large doubles RAM (14GB → enough for vite turbo build).
+          # macos-14 (free Apple Silicon, 7GB RAM). Earlier OOM was from
+          # building the whole workspace incl. @ifc-lite/viewer; now filtered
+          # to just apps/desktop's deps so 7GB is plenty. (macos-14-large
+          # is paid and your account didn't have spending limit configured.)
           - target: macos-universal
-            os: macos-14-large
+            os: macos-14
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
             tauri-args: '--target universal-apple-darwin'
           - target: windows-x64
@@ -147,6 +149,10 @@ jobs:
           releaseName: ${{ github.event_name == 'release' && github.event.release.name || '' }}
           releaseId: ${{ github.event_name == 'release' && github.event.release.id || '' }}
           args: ${{ matrix.tauri-args }}
+          # apps/desktop/package.json has the script as "build:local", not the
+          # default "tauri". Without this override tauri-action runs `npm run
+          # tauri` and fails with "Missing script: tauri".
+          tauriScript: pnpm exec tauri
 
       # For non-release runs, save artifacts so PRs can be downloaded.
       - name: Upload bundles (PR / push)
