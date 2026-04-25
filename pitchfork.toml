@@ -1,0 +1,9 @@
+[daemons.viewer]
+run = "mise exec npm:turbo@2 -- turbo dev --filter @ifc-lite/viewer"
+auto_start = []
+auto_stop = []
+
+[daemons.server]
+run = "./target/release/ifc-lite-server"
+auto_start = []
+auto_stop = []

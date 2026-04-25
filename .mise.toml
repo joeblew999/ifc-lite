@@ -5,6 +5,8 @@ node = "22"
 rust = "nightly-2025-11-15"
 "cargo:wasm-pack" = "latest"
 "npm:turbo" = "2"
+# Process supervisor for dev:all (web + server together)
+"aqua:jdx/pitchfork" = "latest"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
@@ -50,6 +52,73 @@ run = "bash scripts/fetch-test-models.sh"
 [tasks.server]
 description = "Build Rust server binary"
 run = "cargo build --release --package ifc-lite-server"
+
+# ---- Targeted builds: web, embed, desktop, server ----
+# Each delegates to the package's own existing script (pnpm / turbo / cargo / tauri)
+# so the per-package source of truth (package.json or Cargo.toml) stays authoritative.
+
+[tasks."build:web"]
+description = "Production bundle of the browser viewer (apps/viewer → dist/)"
+run = "turbo build --filter @ifc-lite/viewer"
+depends = ["wasm"]
+
+[tasks."build:embed"]
+description = "Production bundle of the embeddable viewer (apps/viewer-embed → dist/)"
+run = "turbo build --filter @ifc-lite/viewer-embed"
+depends = ["wasm"]
+
+[tasks."build:desktop"]
+description = "Tauri desktop build for the current platform (apps/desktop → src-tauri/target/release/bundle/)"
+run = "pnpm --filter @ifc-lite/desktop exec tauri build"
+depends = ["wasm"]
+
+[tasks."build:server"]
+description = "Rust server release binary (target/release/ifc-lite-server)"
+run = "cargo build --release --package ifc-lite-server"
+
+[tasks."build:cli"]
+description = "CLI bundle (packages/cli → dist/)"
+run = "turbo build --filter @ifc-lite/cli"
+depends = ["wasm"]
+
+[tasks."build:all"]
+description = "Build every shippable target: web + embed + desktop + server + cli"
+depends = ["build:web", "build:embed", "build:desktop", "build:server", "build:cli"]
+
+# ---- Targeted dev servers ----
+
+[tasks."dev:web"]
+description = "Viewer dev server with HMR (apps/viewer)"
+run = "turbo dev --filter @ifc-lite/viewer"
+depends = ["wasm"]
+
+[tasks."dev:embed"]
+description = "Embeddable viewer dev server (apps/viewer-embed)"
+run = "turbo dev --filter @ifc-lite/viewer-embed"
+depends = ["wasm"]
+
+[tasks."dev:desktop"]
+description = "Tauri dev (native window + HMR for the embedded viewer)"
+run = "pnpm --filter @ifc-lite/desktop exec tauri dev"
+depends = ["wasm"]
+
+[tasks."dev:server"]
+description = "Run the Rust server in release mode (rebuild + run)"
+run = "cargo run --release --package ifc-lite-server"
+
+[tasks."dev:all"]
+description = "Supervise viewer + server together via pitchfork (uses pitchfork.toml)"
+depends = ["wasm", "build:server"]
+run = """
+pitchfork supervisor start
+pitchfork start -l -f
+pitchfork list
+echo
+echo "Viewer:  http://localhost:3000"
+echo "Server:  http://localhost:8080"
+echo "Logs:    pitchfork logs viewer | pitchfork logs server"
+echo "Stop:    pitchfork stop viewer server"
+"""
 
 [tasks.clean]
 description = "Clean all build outputs"
