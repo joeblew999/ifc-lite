@@ -82,7 +82,12 @@ rust = "nightly-2025-11-15"
 #     surface). If you `security delete-generic-password -s fnox`, fnox loses
 #     the ability to decrypt — same as losing any key file.
 # Public key (the recipient) is in ~/.config/fnox/config.toml.
-FNOX_AGE_KEY = "{{exec(command='security find-generic-password -s fnox -a age-key -w')}}"
+#
+# `|| echo ''` makes the template degrade gracefully on hosts without the
+# Keychain entry (CI runners, fresh machines). fnox just can't decrypt
+# without the key — but CI doesn't need to (it reads secrets from GitHub
+# Actions repo settings, set there by `mise run secrets:sync-github`).
+FNOX_AGE_KEY = "{{exec(command=\"security find-generic-password -s fnox -a age-key -w 2>/dev/null || echo ''\")}}"
 
 [tasks.install]
 description = "Install JS dependencies"
