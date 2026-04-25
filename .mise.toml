@@ -7,6 +7,8 @@ rust = "nightly-2025-11-15"
 "npm:turbo" = "2"
 # Process supervisor for dev:all (web + server together)
 "aqua:jdx/pitchfork" = "latest"
+# Cloudflare CLI for deploy:web / deploy:embed
+"npm:wrangler" = "4"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
@@ -105,6 +107,24 @@ depends = ["wasm"]
 [tasks."dev:server"]
 description = "Run the Rust server in release mode (rebuild + run)"
 run = "cargo run --release --package ifc-lite-server"
+
+# ---- Cloudflare deploys (viewer + embed; server is NOT deployed to CF) ----
+
+[tasks."deploy:web"]
+description = "Deploy the viewer to Cloudflare Workers Static Assets"
+depends = ["build:web"]
+dir = "apps/viewer"
+run = "wrangler deploy"
+
+[tasks."deploy:embed"]
+description = "Deploy the embeddable viewer to Cloudflare Workers Static Assets"
+depends = ["build:embed"]
+dir = "apps/viewer-embed"
+run = "wrangler deploy"
+
+[tasks."deploy:all"]
+description = "Deploy every CF target (web + embed)"
+depends = ["deploy:web", "deploy:embed"]
 
 [tasks."dev:all"]
 description = "Supervise viewer + server together via pitchfork (uses pitchfork.toml)"
