@@ -85,6 +85,14 @@ jobs:
           install: true
           cache: true
 
+      # mise-action caches mise's own state but NOT ~/.rustup/toolchains.
+      # On cache hits the rustup-managed nightly is missing. `rustup show`
+      # reads rust-toolchain.toml and installs the pinned channel + components
+      # if absent — idempotent, no-op when already present.
+      - name: Ensure rust-toolchain.toml is satisfied
+        if: steps.gate.outputs.run == 'true'
+        run: rustup show
+
       # mise tasks delegate to package.json / Cargo.toml — same commands run
       # locally via `mise run deploy:web`.
       - name: Deploy ${{ matrix.app }}
