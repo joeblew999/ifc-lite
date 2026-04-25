@@ -1,3 +1,59 @@
+# =============================================================================
+#   ifc-lite — mise task index
+# =============================================================================
+#
+# Run `mise tasks` for the full list. The naming convention is `<verb>:<target>`
+# where target is one of: web (viewer), embed (viewer-embed), desktop (Tauri),
+# server (Rust axum), cli, all.
+#
+# ─── Quickstart ────────────────────────────────────────────────────────────────
+#   mise install         provision toolchain (node, rust, wasm-pack, turbo,
+#                        pitchfork, wrangler) — only needed once per clone
+#   mise run wasm        build the Rust → WASM bindings (slow first time)
+#   mise run dev:web     start the viewer with HMR at http://localhost:3000
+#   mise run dev:all     viewer + Rust server together under pitchfork
+#                        (viewer :3000, server :8080)
+#
+# ─── Build matrix ──────────────────────────────────────────────────────────────
+#   build:web            apps/viewer/dist/             (vite + turbo)
+#   build:embed          apps/viewer-embed/dist/       (vite + turbo)
+#   build:desktop        apps/desktop/src-tauri/target/release/bundle/  (Tauri)
+#   build:server         target/release/ifc-lite-server                 (cargo)
+#   build:cli            packages/cli/dist/                              (tsc + turbo)
+#   build:all            fan out to all of the above
+#
+# ─── Deploy targets ────────────────────────────────────────────────────────────
+#   deploy:web    →  https://ifc-lite-viewer.gedw99.workers.dev
+#                    Cloudflare Workers Static Assets, SPA mode.
+#                    Production bundle has VITE_USE_SERVER=false so parsing
+#                    runs in-browser via WASM (no backend dependency).
+#
+#   deploy:embed  →  https://ifc-lite-viewer-embed.gedw99.workers.dev
+#                    Same CF Workers deploy, headless variant for iframe
+#                    integrations (Power BI, Superset, etc.).
+#
+#   deploy:all    →  fan out (web + embed)
+#
+#   The Rust server (apps/server) is NOT deployed to Cloudflare — Containers
+#   cold-start and pricing don't fit. If users need server-side acceleration
+#   for very large IFCs, deploy the binary to Railway/Fly/Hetzner and set
+#   VITE_IFC_SERVER_URL + VITE_USE_SERVER=true on the viewer build.
+#
+# ─── Local-dev env ─────────────────────────────────────────────────────────────
+#   apps/viewer/.env.local       — gitignored; if present, viewer routes
+#                                  parse calls to a local server (used by
+#                                  `mise run dev:all`).
+#   apps/viewer/.env.production  — committed; forces in-browser WASM in
+#                                  production bundles regardless of .env.local.
+#
+# ─── Process supervisor ────────────────────────────────────────────────────────
+#   pitchfork.toml declares the daemons used by `dev:all`. Inspect with:
+#     pitchfork list
+#     pitchfork logs viewer
+#     pitchfork stop viewer server
+#
+# =============================================================================
+
 [tools]
 node = "22"
 # Nightly required for WASM build (build-std feature).
@@ -111,20 +167,29 @@ run = "cargo run --release --package ifc-lite-server"
 # ---- Cloudflare deploys (viewer + embed; server is NOT deployed to CF) ----
 
 [tasks."deploy:web"]
-description = "Deploy the viewer to Cloudflare Workers Static Assets"
+description = "Deploy viewer → https://ifc-lite-viewer.gedw99.workers.dev (CF Workers Static Assets, SPA)"
 depends = ["build:web"]
 dir = "apps/viewer"
 run = "wrangler deploy"
 
 [tasks."deploy:embed"]
-description = "Deploy the embeddable viewer to Cloudflare Workers Static Assets"
+description = "Deploy embed → https://ifc-lite-viewer-embed.gedw99.workers.dev (iframe variant)"
 depends = ["build:embed"]
 dir = "apps/viewer-embed"
 run = "wrangler deploy"
 
 [tasks."deploy:all"]
-description = "Deploy every CF target (web + embed)"
+description = "Deploy every CF target (web + embed). Server is NOT on CF — see top of file."
 depends = ["deploy:web", "deploy:embed"]
+
+[tasks."deploy:status"]
+description = "Print deployed URLs and check they're live"
+run = """
+echo "Viewer:  https://ifc-lite-viewer.gedw99.workers.dev"
+curl -sS -o /dev/null -w "         HTTP %{http_code}, %{time_total}s\\n" https://ifc-lite-viewer.gedw99.workers.dev/
+echo "Embed:   https://ifc-lite-viewer-embed.gedw99.workers.dev"
+curl -sS -o /dev/null -w "         HTTP %{http_code}, %{time_total}s\\n" https://ifc-lite-viewer-embed.gedw99.workers.dev/
+"""
 
 [tasks."dev:all"]
 description = "Supervise viewer + server together via pitchfork (uses pitchfork.toml)"
