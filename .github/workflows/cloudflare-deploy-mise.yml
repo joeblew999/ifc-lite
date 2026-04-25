@@ -86,12 +86,16 @@ jobs:
           cache: true
 
       # mise-action caches mise's own state but NOT ~/.rustup/toolchains.
-      # On cache hits the rustup-managed nightly is missing. `rustup show`
-      # reads rust-toolchain.toml and installs the pinned channel + components
-      # if absent — idempotent, no-op when already present.
-      - name: Ensure rust-toolchain.toml is satisfied
+      # On cache hits, rustup may restore the toolchain dir without the
+      # rust-src component (which build-std needs to compile std from source).
+      # Explicit `rustup component add` is idempotent and ensures both the
+      # component and target are present regardless of cache state.
+      - name: Ensure rust toolchain components are present
         if: steps.gate.outputs.run == 'true'
-        run: rustup show
+        run: |
+          rustup show active-toolchain || rustup show
+          rustup component add rust-src --toolchain nightly-2025-11-15
+          rustup target add wasm32-unknown-unknown --toolchain nightly-2025-11-15
 
       # mise tasks delegate to package.json / Cargo.toml — same commands run
       # locally via `mise run deploy:web`.
