@@ -43,6 +43,10 @@ description = "Lint all packages"
 run = "turbo lint"
 depends = ["wasm"]
 
+[tasks.test-models]
+description = "Download IFC test models from public repos"
+run = "bash scripts/fetch-test-models.sh"
+
 [tasks.server]
 description = "Build Rust server binary"
 run = "cargo build --release --package ifc-lite-server"
