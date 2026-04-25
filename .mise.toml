@@ -65,18 +65,20 @@ rust = "nightly-2025-11-15"
 "aqua:jdx/pitchfork" = "2"
 # Cloudflare CLI for deploy:web / deploy:embed
 "npm:wrangler" = "4"
-# Doppler CLI for secrets:* (sync from Doppler → GitHub Actions secrets).
-# "latest" is fine here because DOPPLER_DISABLE_UPDATE_CHECK=1 (set in [env]
-# below) prevents the CLI's own self-update prompt — so mise is the sole
-# version manager. CLI tools have stable behaviour across patches; if you
-# want strict reproducibility instead, pin a major like "3".
-"github:DopplerHQ/cli" = "latest"
+# fnox: secrets manager by jdx (same author as mise). Encrypts secrets at
+# rest with age (using your SSH key as the identity, gated by Touch ID if
+# you ssh-add --apple-use-keychain). Encrypted values live in
+# ~/.config/fnox/config.toml — globally accessible to every project,
+# safe to commit/share since they're useless without the private key.
+"github:jdx/fnox" = "latest"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
-# Suppress Doppler's self-update prompt — mise pins the version via [tools],
-# letting Doppler self-update would put a separate binary outside mise's tracking.
-DOPPLER_DISABLE_UPDATE_CHECK = "1"
+
+# fnox: SSH key as the age decryption identity. The matching public key is
+# the recipient in ~/.config/fnox/config.toml. fnox is invoked via mise so
+# this env var is automatically present anywhere mise is active.
+FNOX_AGE_KEY_FILE = "~/.ssh/id_ed25519"
 
 [tasks.install]
 description = "Install JS dependencies"
@@ -199,33 +201,34 @@ run = "wrangler deploy"
 description = "Deploy every CF target (web + embed). Server is NOT on CF — see top of file."
 depends = ["deploy:web", "deploy:embed"]
 
-# ---- Secrets (Doppler → GitHub Actions) ----
-# Doppler is the SSOT for secrets locally; these tasks push them into GitHub
-# repo secrets so workflows (cloudflare-deploy*.yml, desktop-binaries.yml) can
-# read them. Run `doppler login` and `doppler setup` once in this directory
-# to point the CLI at the right project/config.
+# ---- Secrets (fnox → GitHub Actions) ----
+# fnox is the local source of truth, backed by macOS Keychain via the
+# global `~/.config/fnox/config.toml`. These mise tasks render fnox's
+# values into GitHub repo Actions secrets so CI workflows can read them.
+# Set values once globally with: fnox set <KEY> --global --provider keychain
 
 [tasks."secrets:list"]
-description = "Show the canonical secret list (Doppler key → GitHub secret name)"
+description = "Show the canonical secret mapping (fnox key → GitHub secret name)"
 run = """
 echo "Defined in scripts/sync-github-secrets.sh MAPPING table:"
 grep -E '^\\s+"[A-Z_]+\\s+[A-Z_]+"' scripts/sync-github-secrets.sh | sed 's/^/  /'
 echo
-echo "Uncomment any optional rows in scripts/sync-github-secrets.sh to enable signing."
+echo "Uncomment optional rows in scripts/sync-github-secrets.sh as new"
+echo "secrets are added to fnox (e.g. signing certs)."
 """
 
 [tasks."secrets:status"]
-description = "Compare Doppler secrets vs GitHub repo secrets (read-only)"
+description = "Show fnox secrets vs GitHub repo secrets (read-only)"
 run = """
-echo "== Doppler =="
-doppler secrets --only-names 2>/dev/null || echo "  (run: doppler login && doppler setup)"
+echo "== fnox =="
+fnox list 2>/dev/null || echo "  (no config — run: fnox init --global)"
 echo
 echo "== GitHub repo secrets =="
 gh secret list 2>/dev/null || echo "  (run: gh auth login)"
 """
 
 [tasks."secrets:sync-github"]
-description = "Push secrets from Doppler → GitHub Actions repo secrets"
+description = "Push secrets from fnox → GitHub Actions repo secrets"
 run = "bash scripts/sync-github-secrets.sh"
 
 [tasks."secrets:sync-github-dry"]

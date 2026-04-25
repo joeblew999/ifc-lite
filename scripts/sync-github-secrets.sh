@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
-# Sync secrets from Doppler → GitHub repo Actions secrets.
+# Sync secrets from fnox → GitHub repo Actions secrets.
 #
-# Reads the canonical secret list from this script's MAPPING table
-# (Doppler key -> GitHub secret name). Idempotent: re-running just
-# refreshes whatever has changed.
+# fnox reads from macOS Keychain (or whatever providers are configured
+# in ~/.config/fnox/config.toml + project fnox.toml). Idempotent: re-
+# running just refreshes whatever changed in the source.
 #
 # Required:
-#   - doppler CLI (provisioned via mise)
+#   - fnox CLI (provisioned via mise)
 #   - gh CLI authenticated to the target repo
-#   - Either `doppler configure` set in the working dir, OR
-#     DOPPLER_PROJECT + DOPPLER_CONFIG env vars
+#   - Secrets present in fnox (e.g. via `fnox set KEY --global`)
 #
 # Usage:
-#   bash scripts/sync-github-secrets.sh                  # uses gh's default repo
+#   bash scripts/sync-github-secrets.sh                  # default repo
 #   bash scripts/sync-github-secrets.sh --repo owner/r   # explicit
 #   bash scripts/sync-github-secrets.sh --dry-run        # show plan only
 set -euo pipefail
@@ -34,16 +33,15 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ---- canonical secret mapping --------------------------------------------
-# Format: "DOPPLER_KEY GITHUB_SECRET"
+# Format: "FNOX_KEY GITHUB_SECRET"
 # Add to this list as new workflows need new secrets.
 MAPPING=(
-  # Cloudflare deploy (cloudflare-deploy.yml, cloudflare-deploy-mise.yml)
+  # Cloudflare deploy (cloudflare-deploy-mise.yml)
   "CLOUDFLARE_API_TOKEN   CLOUDFLARE_API_TOKEN"
   "CLOUDFLARE_ACCOUNT_ID  CLOUDFLARE_ACCOUNT_ID"
 
-  # Optional: desktop signing (desktop-binaries.yml). Comment out the lines
-  # for any cert you don't yet have in Doppler — gh secret set fails on missing
-  # source keys, so absence here means "skip".
+  # Optional: desktop signing (desktop-binaries.yml). Uncomment when present
+  # in fnox (e.g. `fnox set APPLE_CERTIFICATE --global`).
   # "APPLE_CERTIFICATE              APPLE_CERTIFICATE"
   # "APPLE_CERTIFICATE_PASSWORD     APPLE_CERTIFICATE_PASSWORD"
   # "APPLE_SIGNING_IDENTITY         APPLE_SIGNING_IDENTITY"
@@ -55,15 +53,13 @@ MAPPING=(
 )
 # ---------------------------------------------------------------------------
 
-command -v doppler >/dev/null || { echo "doppler not on PATH (run via 'mise exec' or 'mise run secrets:*')" >&2; exit 1; }
-command -v gh >/dev/null || { echo "gh CLI not installed" >&2; exit 1; }
+command -v fnox >/dev/null || { echo "fnox not on PATH (run via 'mise exec' or 'mise run secrets:*')" >&2; exit 1; }
+command -v gh   >/dev/null || { echo "gh CLI not installed" >&2; exit 1; }
 
 # Show what we're about to do.
-echo "Syncing $(( ${#MAPPING[@]} )) secrets from Doppler → GitHub..."
+echo "Syncing $(( ${#MAPPING[@]} )) secrets from fnox → GitHub..."
 echo "  Target repo: $REPO"
-proj="${DOPPLER_PROJECT:-$(doppler configure get project --plain 2>/dev/null || echo '(default)')}"
-cfg="${DOPPLER_CONFIG:-$(doppler configure get config --plain 2>/dev/null || echo '(default)')}"
-echo "  Doppler:     project=$proj config=$cfg"
+echo "  fnox source: ~/.config/fnox/config.toml + project fnox.toml (if any)"
 echo
 
 ok=0
@@ -71,26 +67,26 @@ skipped=0
 failed=0
 
 for entry in "${MAPPING[@]}"; do
-  read -r dkey gkey <<<"$entry"
-  if value=$(doppler secrets get "$dkey" --plain 2>/dev/null); then
+  read -r fkey gkey <<<"$entry"
+  if value=$(fnox get "$fkey" 2>/dev/null); then
     if [[ -z "$value" ]]; then
-      echo "  ⤬ $dkey → $gkey (empty in Doppler, skipping)"
+      echo "  ⤬ $fkey → $gkey (empty in fnox, skipping)"
       skipped=$((skipped+1))
       continue
     fi
     if $DRY_RUN; then
-      echo "  ✓ $dkey → $gkey  (dry-run, would set ${#value} bytes)"
+      echo "  ✓ $fkey → $gkey  (dry-run, would set ${#value} bytes)"
     else
       if printf '%s' "$value" | gh secret set "$gkey" --repo "$REPO" --body - >/dev/null 2>&1; then
-        echo "  ✓ $dkey → $gkey  (${#value} bytes)"
+        echo "  ✓ $fkey → $gkey  (${#value} bytes)"
         ok=$((ok+1))
       else
-        echo "  ✗ $dkey → $gkey  (gh secret set failed)"
+        echo "  ✗ $fkey → $gkey  (gh secret set failed)"
         failed=$((failed+1))
       fi
     fi
   else
-    echo "  ⤬ $dkey not in Doppler (skipping)"
+    echo "  ⤬ $fkey not in fnox (skipping)"
     skipped=$((skipped+1))
   fi
 done
