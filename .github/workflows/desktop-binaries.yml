@@ -128,17 +128,13 @@ jobs:
       #   - cargo build of src-tauri
       #   - platform bundler (.dmg / .msi / .AppImage + .deb)
       # And attaches the bundles to the triggering release if any.
-      # Pin to a specific tag — tauri-apps/tauri-action@v0 (the major alias)
-      # bundles JS with a top-level await that fails on Node 22 mise installs:
-      # "Detected unsettled top-level await ... __webpack_exports__ = await ...".
-      # Bumping to action-v0.6.2 picks up the Node-22-compatible build.
-      - name: Build & bundle desktop app
-        uses: tauri-apps/tauri-action@action-v0.6.2
+      # tauri-action (any version) bundles JS with a top-level await that
+      # crashes on Node 22 mise installs. Skip the action and call tauri
+      # directly — fewer moving parts, same outcome.
+      - name: Build desktop bundle
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional code-signing secrets — if absent, builds are unsigned
-          # (functional, but macOS/Windows show "unidentified developer").
-          # Add via repo Settings → Secrets to enable signing.
+          # Optional code-signing secrets — if absent, builds are unsigned.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -147,16 +143,28 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          projectPath: apps/desktop
-          tagName: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
-          releaseName: ${{ github.event_name == 'release' && github.event.release.name || '' }}
-          releaseId: ${{ github.event_name == 'release' && github.event.release.id || '' }}
-          args: ${{ matrix.tauri-args }}
-          # apps/desktop/package.json has the script as "build:local", not the
-          # default "tauri". Without this override tauri-action runs `npm run
-          # tauri` and fails with "Missing script: tauri".
-          tauriScript: pnpm exec tauri
+        run: mise exec -- pnpm --filter @ifc-lite/desktop exec tauri build ${{ matrix.tauri-args }}
+
+      # Attach to release on `release: published`, otherwise just upload as artifact.
+      - name: Attach bundles to release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find every produced bundle (.dmg / .msi / .AppImage / .deb).
+          shopt -s nullglob globstar
+          files=(
+            apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/**/release/bundle/msi/*.msi
+            apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
+            apps/desktop/src-tauri/target/**/release/bundle/deb/*.deb
+          )
+          if (( ${#files[@]} == 0 )); then
+            echo "no bundles produced — check tauri build step" >&2
+            exit 1
+          fi
+          gh release upload "${{ github.event.release.tag_name }}" --clobber "${files[@]}"
 
       # For non-release runs, save artifacts so PRs can be downloaded.
       - name: Upload bundles (PR / push)
