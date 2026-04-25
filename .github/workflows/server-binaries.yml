@@ -84,6 +84,7 @@ jobs:
           sudo apt-get install -y musl-tools musl-dev
 
       - name: Build Server Binary
+        shell: bash
         run: |
           if [ "${{ matrix.target }}" = "linux-x64-musl" ]; then
             cross build --release --package ifc-lite-server --target ${{ matrix.rust-target }}
@@ -190,6 +191,7 @@ jobs:
           sudo apt-get install -y musl-tools musl-dev
 
       - name: Build Server Binary
+        shell: bash
         run: |
           if [ "${{ matrix.target }}" = "linux-x64-musl" ]; then
             cross build --release --package ifc-lite-server --target ${{ matrix.rust-target }}
