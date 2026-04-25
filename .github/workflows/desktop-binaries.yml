@@ -51,16 +51,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # macos-14 ran OOM (exit 137) bundling the viewer's cesium chunk;
+          # macos-14-large doubles RAM (14GB → enough for vite turbo build).
           - target: macos-universal
-            os: macos-14
+            os: macos-14-large
             rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
             tauri-args: '--target universal-apple-darwin'
           - target: windows-x64
             os: windows-latest
             rust-targets: 'x86_64-pc-windows-msvc'
             tauri-args: '--target x86_64-pc-windows-msvc'
+          # ubuntu-22.04 ships glibc 2.35; mise-installed wasm-pack needs
+          # GLIBC_2.39, so use ubuntu-latest (24.04 = glibc 2.39).
           - target: linux-x64
-            os: ubuntu-22.04
+            os: ubuntu-latest
             rust-targets: 'x86_64-unknown-linux-gnu'
             tauri-args: '--target x86_64-unknown-linux-gnu'
 
@@ -82,7 +86,9 @@ jobs:
       # Per-platform binary targets (mac universal needs both arches, etc).
       # mise's rust toolchain ships with the channel; platform-specific
       # binary targets are workflow concerns, not project SSOT.
+      # `shell: bash` is required because windows-latest defaults to PowerShell.
       - name: Add Rust platform targets
+        shell: bash
         run: |
           for t in $(echo "${{ matrix.rust-targets }}" | tr ',' ' '); do
             rustup target add "$t"
@@ -109,8 +115,11 @@ jobs:
           mise run install
           mise run wasm
 
-      - name: Build shared TS packages
-        run: mise exec -- pnpm build
+      # Build only what apps/desktop transitively depends on. Building the
+      # whole workspace (including standalone @ifc-lite/viewer with cesium
+      # + maplibre chunks) was causing OOM on macos runners.
+      - name: Build desktop's workspace deps
+        run: mise exec -- pnpm build --filter @ifc-lite/desktop...
 
       # Tauri-action drives the whole bundle pipeline:
       #   - vite build of the desktop frontend
