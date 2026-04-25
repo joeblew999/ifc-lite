@@ -65,11 +65,18 @@ rust = "nightly-2025-11-15"
 "aqua:jdx/pitchfork" = "2"
 # Cloudflare CLI for deploy:web / deploy:embed
 "npm:wrangler" = "4"
-# Doppler CLI for secrets:* (sync from Doppler → GitHub Actions secrets)
-"github:DopplerHQ/cli" = "3"
+# Doppler CLI for secrets:* (sync from Doppler → GitHub Actions secrets).
+# "latest" is fine here because DOPPLER_DISABLE_UPDATE_CHECK=1 (set in [env]
+# below) prevents the CLI's own self-update prompt — so mise is the sole
+# version manager. CLI tools have stable behaviour across patches; if you
+# want strict reproducibility instead, pin a major like "3".
+"github:DopplerHQ/cli" = "latest"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
+# Suppress Doppler's self-update prompt — mise pins the version via [tools],
+# letting Doppler self-update would put a separate binary outside mise's tracking.
+DOPPLER_DISABLE_UPDATE_CHECK = "1"
 
 [tasks.install]
 description = "Install JS dependencies"
