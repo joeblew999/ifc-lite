@@ -70,21 +70,23 @@ jobs:
         with:
           lfs: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
+      # SSOT: mise installs node, rust (pinned nightly via .mise.toml),
+      # wasm-pack, turbo — same toolchain devs use locally. No duplicated
+      # tool-version declarations in the workflow.
+      - name: Setup mise
+        uses: jdx/mise-action@v2
         with:
-          version: 10
+          install: true
+          cache: true
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust-targets }}
+      # Per-platform binary targets (mac universal needs both arches, etc).
+      # mise's rust toolchain ships with the channel; platform-specific
+      # binary targets are workflow concerns, not project SSOT.
+      - name: Add Rust platform targets
+        run: |
+          for t in $(echo "${{ matrix.rust-targets }}" | tr ',' ' '); do
+            rustup target add "$t"
+          done
 
       # Tauri's webview / bundling deps. macOS and Windows have what they need
       # in the runner image already; only Linux needs apt installs.
@@ -100,19 +102,15 @@ jobs:
             patchelf \
             build-essential
 
-      - name: Install wasm-pack
-        uses: jetli/wasm-pack-action@v0.4.0
-        with:
-          version: 'latest'
-
-      - name: Install JS deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Build WASM bindings
-        run: bash scripts/build-wasm.sh
+      # Install JS deps + build WASM (rust:components dependency ensures
+      # rust-src + wasm32 target are present even on cache hits).
+      - name: Install JS deps + build WASM
+        run: |
+          mise run install
+          mise run wasm
 
       - name: Build shared TS packages
-        run: pnpm build
+        run: mise exec -- pnpm build
 
       # Tauri-action drives the whole bundle pipeline:
       #   - vite build of the desktop frontend
