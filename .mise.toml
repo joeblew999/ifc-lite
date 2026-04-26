@@ -71,6 +71,11 @@ rust = "nightly-2025-11-15"
 # ~/.config/fnox/config.toml — globally accessible to every project,
 # safe to commit/share since they're useless without the private key.
 "github:jdx/fnox" = "latest"
+# age: CLI used to generate / re-encrypt the fnox master key.
+"aqua:FiloSottile/age" = "1"
+# GitHub CLI: used by secrets:sync-github + scripts/sync-github-secrets.sh
+# and by secrets:status. Pinning here keeps mise as the SSOT for tools.
+"aqua:cli/cli" = "2"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
