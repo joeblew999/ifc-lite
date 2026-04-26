@@ -92,7 +92,10 @@ rust = "nightly-2025-11-15"
 # Keychain entry (CI runners, fresh machines). fnox just can't decrypt
 # without the key — but CI doesn't need to (it reads secrets from GitHub
 # Actions repo settings, set there by `mise run secrets:sync-github`).
-FNOX_AGE_KEY = "{{exec(command=\"security find-generic-password -s fnox -a age-key -w 2>/dev/null || echo ''\")}}"
+# Wrap in `sh -c` so the shell parses 2>/dev/null and || (mise's exec()
+# helper splits the command string by whitespace; redirects/pipes need
+# a real shell). Absolute /usr/bin/security so PATH resolution can't fail.
+FNOX_AGE_KEY = "{{exec(command=\"sh\", args=\"-c '/usr/bin/security find-generic-password -s fnox -a age-key -w 2>/dev/null || true'\")}}"
 
 [tasks.install]
 description = "Install JS dependencies (with safety nuke if a foreign package manager left artifacts)"
