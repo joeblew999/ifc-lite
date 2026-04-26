@@ -56,14 +56,18 @@ jobs:
           # have. Single-arch with ad-hoc signing (signingIdentity: "-")
           # works without a cert. Apple Silicon covers ~95% of Mac users
           # in 2026; Intel kept for the long-tail.
+          # macOS overrides via sidecar config file (apps/desktop/src-tauri/
+          # tauri.macos-adhoc.json) — passing inline JSON via --config in
+          # YAML matrix gets mangled by bash quoting + GitHub's secret
+          # masking (turns -- into ***). File-based override sidesteps both.
           - target: macos-arm64
             os: macos-14
             rust-targets: 'aarch64-apple-darwin'
-            tauri-args: '--target aarch64-apple-darwin --config {"bundle":{"macOS":{"signingIdentity":"-"}}}'
+            tauri-args: '--target aarch64-apple-darwin --config tauri.macos-adhoc.json'
           - target: macos-x64
             os: macos-14
             rust-targets: 'x86_64-apple-darwin'
-            tauri-args: '--target x86_64-apple-darwin --config {"bundle":{"macOS":{"signingIdentity":"-"}}}'
+            tauri-args: '--target x86_64-apple-darwin --config tauri.macos-adhoc.json'
           - target: windows-x64
             os: windows-latest
             rust-targets: 'x86_64-pc-windows-msvc'
