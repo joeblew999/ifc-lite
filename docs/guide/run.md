@@ -37,7 +37,7 @@ Download the latest bundle from [GitHub Releases](https://github.com/joeblew999/
 | Linux x64 (AppImage) | `IFC-Lite Viewer_*.AppImage` |
 | Linux x64 (Debian / Ubuntu) | `ifc-lite-viewer_*.deb` |
 
-The bundles are produced by `.github/workflows/desktop-binaries.yml`. Builds without code-signing certificates trigger first-launch warnings on macOS and Windows; right-click → Open on Mac, "More info → Run anyway" on Windows.
+The bundles are produced by `.github/workflows/desktop-binaries-mise.yml`. Builds without code-signing certificates trigger first-launch warnings on macOS and Windows; right-click → Open on Mac, "More info → Run anyway" on Windows.
 
 Built locally instead:
 
@@ -155,7 +155,7 @@ Then `mise run deploy:web` republishes to the same Cloudflare Worker, now server
 
 ## Secrets (Doppler → GitHub)
 
-CI workflows (`cloudflare-deploy*.yml`, `desktop-binaries.yml`) read secrets from GitHub Actions secrets. The canonical store is **Doppler**; a mise task syncs Doppler → GitHub so you don't manually paste tokens into the GitHub UI.
+CI workflows (`cloudflare-deploy-mise.yml`, `desktop-binaries-mise.yml`) read secrets from GitHub Actions secrets. The canonical store is **Doppler**; a mise task syncs Doppler → GitHub so you don't manually paste tokens into the GitHub UI.
 
 ```bash
 # One-time setup

@@ -11,14 +11,14 @@
 # same release-attachment behaviour, different artifact (GUI app vs server
 # binary). Together they cover every native target users might want.
 
-name: Desktop Binaries
+name: Desktop Binaries (mise)
 
 on:
   push:
     branches:
       - main
     paths:
-      - '.github/workflows/desktop-binaries.yml'
+      - '.github/workflows/desktop-binaries-mise.yml'
       - 'apps/desktop/**'
       - 'packages/wasm/**'
       - 'rust/**'
@@ -27,7 +27,7 @@ on:
       - 'rust-toolchain.toml'
   pull_request:
     paths:
-      - '.github/workflows/desktop-binaries.yml'
+      - '.github/workflows/desktop-binaries-mise.yml'
       - 'apps/desktop/**'
       - 'packages/wasm/**'
       - 'rust/**'
