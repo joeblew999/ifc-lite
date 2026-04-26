@@ -1,5 +1,42 @@
 # @ifc-lite/parser
 
+## 2.2.0
+
+### Minor Changes
+
+- [#576](https://github.com/louistrue/ifc-lite/pull/576) [`1309f8c`](https://github.com/louistrue/ifc-lite/commit/1309f8cba128b3b6237ebfb9831bf359c426a742) Thanks [@louistrue](https://github.com/louistrue)! - Add IFC 4D / construction scheduling extractor (`extractScheduleOnDemand`).
+  Parses `IfcTask`, `IfcTaskTime`, `IfcRelSequence`, `IfcRelAssignsToProcess`,
+  `IfcRelAssignsToControl`, `IfcRelNests`, `IfcWorkSchedule`, `IfcWorkPlan`, and
+  `IfcLagTime` from the source buffer and returns a normalized
+  `ScheduleExtraction` — hierarchy, assigned products, typed dependency edges
+  (FS/SS/FF/SF with `IfcLagTime` resolved to seconds), and work-schedule
+  grouping — that UIs can drive a Gantt view and 4D animation from.
+
+- [#576](https://github.com/louistrue/ifc-lite/pull/576) [`1309f8c`](https://github.com/louistrue/ifc-lite/commit/1309f8cba128b3b6237ebfb9831bf359c426a742) Thanks [@louistrue](https://github.com/louistrue)! - Add schedule-serializer + deterministic-GlobalId helpers.
+
+  **`serializeScheduleToStep(extraction, options)`** emits a `ScheduleExtraction`
+  back into IFC-STEP lines (`IfcWorkSchedule`, `IfcWorkPlan`, `IfcTask`,
+  `IfcTaskTime`, `IfcRelNests`, `IfcRelSequence`, `IfcLagTime`,
+  `IfcRelAssignsToControl`, `IfcRelAssignsToProcess`), resolving cross-entity
+  references by expressId and reporting per-type line counts in `stats`.
+  Pairs with the existing `extractScheduleOnDemand` to make schedule data
+  fully round-trippable through a STEP export.
+
+  **`deterministicGlobalId(seed)`** — 128-bit double-FNV-1a hash encoded as a
+  22-char IFC GlobalId. Deterministic (same seed ⇒ same id), collision-safe
+  across schedule-generation seeds, and exposed as a single source of truth
+  for every caller that previously kept a private copy of the algorithm.
+
+### Patch Changes
+
+- [#578](https://github.com/louistrue/ifc-lite/pull/578) [`16d7a63`](https://github.com/louistrue/ifc-lite/commit/16d7a6361a78bb39a2bd61bba6990db5d3df0c04) Thanks [@louistrue](https://github.com/louistrue)! - Surface on-demand properties and quantities through the query API.
+
+  `parseColumnar` intentionally leaves the pre-parsed `store.properties` / `store.quantities` tables empty and populates `onDemandPropertyMap` / `onDemandQuantityMap` instead, but `QueryResultEntity` only read from the empty pre-parsed tables. As a result `query.ofType(...).includeProperties().includeQuantities().execute()` always returned elements with empty `properties` / `quantities`, even when the IFC file contained them (issue #577).
+
+  `loadPropertiesFromStore` / `loadQuantitiesFromStore` in `query-result-entity.ts` now fall back to `extractPropertiesOnDemand` / `extractQuantitiesOnDemand` when the pre-parsed tables are empty and the on-demand maps are present. This applies to the `properties` / `quantities` getters, the `loadProperties` / `loadQuantities` eager loaders, and the `getProperty()` accessor.
+
+  Also normalizes untagged STEP enumeration tokens (`.T.` / `.F.` / `.U.` / `.X.`) emitted by some authoring tools in the `NominalValue` slot of `IfcPropertySingleValue`: `.T.` / `.F.` now decode to real JS booleans and `.U.` / `.X.` to a Logical `null`, matching the behavior of the conformant `IFCBOOLEAN(...)` / `IFCLOGICAL(...)` typed form.
+
 ## 2.1.9
 
 ### Patch Changes

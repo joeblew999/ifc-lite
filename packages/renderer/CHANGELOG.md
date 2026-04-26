@@ -1,5 +1,18 @@
 # @ifc-lite/renderer
 
+## 1.16.1
+
+### Patch Changes
+
+- [#576](https://github.com/louistrue/ifc-lite/pull/576) [`1309f8c`](https://github.com/louistrue/ifc-lite/commit/1309f8cba128b3b6237ebfb9831bf359c426a742) Thanks [@louistrue](https://github.com/louistrue)! - Support real alpha-blended colour overlays so 4D phase tints composite
+  over the underlying material instead of replacing it. Previously the
+  overlay pipeline only respected the RGB channels; alpha below 1.0 produced
+  muddy opaque colour. With this change the overlay path honours per-entity
+  alpha + skips the glass-fresnel branch, so the 4D animator's preparation
+  ghost and palette-intensity slider render as proper translucent tints.
+- Updated dependencies [[`18c6a37`](https://github.com/louistrue/ifc-lite/commit/18c6a37f1cc1426daa32ee60457dd0580a5257f5)]:
+  - @ifc-lite/wasm@1.16.7
+
 ## 1.16.0
 
 ### Minor Changes
