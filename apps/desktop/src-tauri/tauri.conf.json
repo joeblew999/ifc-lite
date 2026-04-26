@@ -32,7 +32,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "//createUpdaterArtifacts": "Disabled until: (1) TAURI_SIGNING_PRIVATE_KEY is base64-encoded in fnox/CI, and (2) macOS bundle step skips OS codesign properly when no certs. Re-enable + bump release once both are resolved. Updater plugin stays wired in code.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
