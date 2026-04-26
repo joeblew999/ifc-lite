@@ -134,7 +134,9 @@ jobs:
       - name: Build desktop bundle
         shell: bash
         env:
-          # Optional code-signing secrets — if absent, builds are unsigned.
+          # Optional code-signing secrets. When unset (no certs in repo),
+          # we explicitly disable signing — otherwise tauri tries to use
+          # an empty identity and fails with `SecKeychainItemImport`.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -143,7 +145,14 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: mise exec -- pnpm --filter @ifc-lite/desktop exec tauri build ${{ matrix.tauri-args }}
+        run: |
+          extra=""
+          if [[ -z "$APPLE_CERTIFICATE" && "${{ runner.os }}" == "macOS" ]]; then
+            # No signing identity available — disable codesign so the bundle
+            # step doesn't try to import an empty cert.
+            extra='--config {"bundle":{"macOS":{"signingIdentity":null}}}'
+          fi
+          mise exec -- pnpm --filter @ifc-lite/desktop exec tauri build ${{ matrix.tauri-args }} $extra
 
       # Attach to release on `release: published`, otherwise just upload as artifact.
       - name: Attach bundles to release
@@ -155,10 +164,10 @@ jobs:
           # Find every produced bundle (.dmg / .msi / .AppImage / .deb).
           shopt -s nullglob globstar
           files=(
-            apps/desktop/src-tauri/target/**/release/bundle/dmg/*.dmg
-            apps/desktop/src-tauri/target/**/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/**/release/bundle/appimage/*.AppImage
-            apps/desktop/src-tauri/target/**/release/bundle/deb/*.deb
+            target/**/release/bundle/dmg/*.dmg
+            target/**/release/bundle/msi/*.msi
+            target/**/release/bundle/appimage/*.AppImage
+            target/**/release/bundle/deb/*.deb
           )
           if (( ${#files[@]} == 0 )); then
             echo "no bundles produced — check tauri build step" >&2
@@ -173,8 +182,8 @@ jobs:
         with:
           name: ifc-lite-desktop-${{ matrix.target }}
           path: |
-            apps/desktop/src-tauri/target/*/release/bundle/dmg/*.dmg
-            apps/desktop/src-tauri/target/*/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/*/release/bundle/appimage/*.AppImage
-            apps/desktop/src-tauri/target/*/release/bundle/deb/*.deb
+            target/*/release/bundle/dmg/*.dmg
+            target/*/release/bundle/msi/*.msi
+            target/*/release/bundle/appimage/*.AppImage
+            target/*/release/bundle/deb/*.deb
           if-no-files-found: warn
