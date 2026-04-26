@@ -242,8 +242,8 @@ run = """
 echo "== fnox =="
 fnox list 2>/dev/null || echo "  (no config — run: fnox init --global)"
 echo
-echo "== GitHub repo secrets =="
-gh secret list 2>/dev/null || echo "  (run: gh auth login)"
+echo "== GitHub repo secrets (joeblew999/ifc-lite) =="
+gh secret list --repo joeblew999/ifc-lite 2>/dev/null || echo "  (run: gh auth login)"
 """
 
 [tasks."secrets:sync-github"]
