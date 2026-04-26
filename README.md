@@ -23,6 +23,18 @@ Open, view, and work with IFC files. Right in the browser.
   <a href="https://crates.io/crates/ifc-lite-core"><img src="https://img.shields.io/crates/v/ifc-lite-core?style=flat-square&logo=rust&label=core" alt="crates.io"></a>
 </p>
 
+> **🟢 Live (this fork's deployment)** — fork of [louistrue/ifc-lite](https://github.com/louistrue/ifc-lite) deployed to Cloudflare Workers + GitHub Releases.
+>
+> | What | Where |
+> |---|---|
+> | Browser viewer | <https://ifc-lite-viewer.gedw99.workers.dev> |
+> | Embeddable (iframe) viewer | <https://ifc-lite-viewer-embed.gedw99.workers.dev> |
+> | Desktop app (.dmg / .msi / .AppImage / .deb) | [Releases page](https://github.com/joeblew999/ifc-lite/releases/latest) |
+> | Native server binary (Mac / Linux / Windows) | [Releases page](https://github.com/joeblew999/ifc-lite/releases/latest) |
+> | CLI: `npm install -g @ifc-lite/cli` | [npm](https://www.npmjs.com/package/@ifc-lite/cli) |
+>
+> Full install / run guide: [docs/guide/run.md](docs/guide/run.md).
+
 ---
 
 ## What is IFClite?
