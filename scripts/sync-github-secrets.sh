@@ -40,7 +40,11 @@ MAPPING=(
   "CLOUDFLARE_API_TOKEN   CLOUDFLARE_API_TOKEN"
   "CLOUDFLARE_ACCOUNT_ID  CLOUDFLARE_ACCOUNT_ID"
 
-  # Optional: desktop signing (desktop-binaries.yml). Uncomment when present
+  # Tauri update bundle signing — required for the in-app auto-updater.
+  # Public key lives in apps/desktop/src-tauri/tauri.conf.json.
+  "TAURI_SIGNING_PRIVATE_KEY      TAURI_SIGNING_PRIVATE_KEY"
+
+  # Optional: macOS code-signing (.app gatekeeper). Uncomment when present
   # in fnox (e.g. `fnox set APPLE_CERTIFICATE --global`).
   # "APPLE_CERTIFICATE              APPLE_CERTIFICATE"
   # "APPLE_CERTIFICATE_PASSWORD     APPLE_CERTIFICATE_PASSWORD"
@@ -48,7 +52,6 @@ MAPPING=(
   # "APPLE_ID                       APPLE_ID"
   # "APPLE_PASSWORD                 APPLE_PASSWORD"
   # "APPLE_TEAM_ID                  APPLE_TEAM_ID"
-  # "TAURI_SIGNING_PRIVATE_KEY      TAURI_SIGNING_PRIVATE_KEY"
   # "TAURI_SIGNING_PRIVATE_KEY_PASSWORD TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
 )
 # ---------------------------------------------------------------------------

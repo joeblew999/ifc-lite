@@ -16,9 +16,13 @@ import ReactDOM from 'react-dom/client';
 import App from '@/App';
 // Import desktop's own CSS (includes @source directive for Tailwind content scanning)
 import './index.css';
+import { checkForUpdatesOnStartup } from './updater';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
 );
+
+// Fire-and-forget background updater check. Non-blocking; failures logged.
+void checkForUpdatesOnStartup();
