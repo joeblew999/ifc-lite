@@ -295,12 +295,12 @@ description = "Dry-run of secrets:sync-github (show plan, change nothing)"
 run = "bash scripts/sync-github-secrets.sh --dry-run"
 
 [tasks."deploy:status"]
-description = "Print deployed URLs and check they're live"
+description = "Print deployed URLs and check they're live (--fail makes non-2xx exit non-zero so CI catches broken deploys)"
 run = """
 echo "Viewer:  https://ifc-lite-viewer.gedw99.workers.dev"
-curl -sS -o /dev/null -w "         HTTP %{http_code}, %{time_total}s\\n" https://ifc-lite-viewer.gedw99.workers.dev/
+curl -fsS -o /dev/null -w "         HTTP %{http_code}, %{time_total}s\\n" https://ifc-lite-viewer.gedw99.workers.dev/
 echo "Embed:   https://ifc-lite-viewer-embed.gedw99.workers.dev"
-curl -sS -o /dev/null -w "         HTTP %{http_code}, %{time_total}s\\n" https://ifc-lite-viewer-embed.gedw99.workers.dev/
+curl -fsS -o /dev/null -w "         HTTP %{http_code}, %{time_total}s\\n" https://ifc-lite-viewer-embed.gedw99.workers.dev/
 """
 
 [tasks."dev:all"]

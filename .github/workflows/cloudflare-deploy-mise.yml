@@ -95,3 +95,24 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: mise run ${{ matrix.mise_task }}
+
+  # Post-deploy smoke check. Runs once after the matrix completes. Hits
+  # both live URLs and fails the workflow if either returns non-2xx.
+  # Catches the wrangler-said-OK-but-asset-missing class of failure.
+  verify:
+    name: Verify live URLs (mise run deploy:status)
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: github.event_name != 'workflow_dispatch' || github.event.inputs.target == 'all'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Setup mise
+        uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - name: Smoke (deploy:status)
+        run: mise run deploy:status
