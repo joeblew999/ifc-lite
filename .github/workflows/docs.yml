@@ -22,6 +22,8 @@ concurrency:
 
 jobs:
   build:
+    # Fork guard: only run on upstream. Our fork doesn't use GitHub Pages.
+    if: github.repository == 'louistrue/ifc-lite'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -103,6 +105,8 @@ jobs:
           path: site
 
   deploy:
+    # Fork guard: only run on upstream.
+    if: github.repository == 'louistrue/ifc-lite'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

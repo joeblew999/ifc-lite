@@ -24,6 +24,8 @@ permissions:
 jobs:
   desktop-frontend-build:
     name: Desktop frontend build
+    # Fork guard: only run on upstream. We control desktop on our fork directly.
+    if: github.repository == 'louistrue/ifc-lite'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -56,6 +58,8 @@ jobs:
 
   desktop-override-audit:
     name: Desktop override audit
+    # Fork guard: only run on upstream.
+    if: github.repository == 'louistrue/ifc-lite'
     runs-on: ubuntu-latest
     timeout-minutes: 5
 

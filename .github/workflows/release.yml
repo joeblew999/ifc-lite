@@ -10,6 +10,9 @@ concurrency: ${{ github.workflow }}-${{ github.ref }}
 jobs:
   release:
     name: Release
+    # Fork guard: only run on the upstream repo. Our fork (joeblew999/ifc-lite)
+    # doesn't publish to npm/cargo and doesn't own NPM_TOKEN/CARGO_TOKEN.
+    if: github.repository == 'louistrue/ifc-lite'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -107,7 +110,8 @@ jobs:
   verify-npm-publish:
     name: Verify npm publish
     needs: release
-    if: needs.release.outputs.published == 'true'
+    # Fork guard + original publish-success gate.
+    if: github.repository == 'louistrue/ifc-lite' && needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo

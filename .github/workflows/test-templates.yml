@@ -12,6 +12,8 @@ on:
 jobs:
   test-templates:
     name: Scaffold & verify (${{ matrix.template }})
+    # Fork guard: only run on upstream. We don't ship create-ifc-lite.
+    if: github.repository == 'louistrue/ifc-lite'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

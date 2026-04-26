@@ -29,6 +29,8 @@ env:
 jobs:
   docker:
     name: Build & Push Docker Image
+    # Fork guard: only run on upstream. Pushes to ghcr.io/louistrue/...
+    if: github.repository == 'louistrue/ifc-lite'
     runs-on: ubuntu-latest
     permissions:
       contents: read
