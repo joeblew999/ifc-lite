@@ -90,8 +90,18 @@ rust = "nightly-2025-11-15"
 FNOX_AGE_KEY = "{{exec(command=\"security find-generic-password -s fnox -a age-key -w 2>/dev/null || echo ''\")}}"
 
 [tasks.install]
-description = "Install JS dependencies"
-run = "corepack enable && pnpm install"
+description = "Install JS dependencies (with safety nuke if a foreign package manager left artifacts)"
+# If aube/yarn/npm left behind their layout (e.g. .aube/ symlinks), pnpm
+# won't always restore per-package node_modules/@types/ correctly. Detect
+# and nuke first.
+run = """
+corepack enable
+if [ -d node_modules/.aube ] || [ -d node_modules/.yarn ]; then
+  echo "→ foreign package manager artifacts detected; nuking node_modules first"
+  rm -rf node_modules apps/*/node_modules packages/*/node_modules 2>/dev/null || true
+fi
+pnpm install
+"""
 
 [tasks."rust:components"]
 description = "Ensure rust-toolchain.toml components/targets are installed (idempotent, cross-shell)"
