@@ -113,9 +113,24 @@ jobs:
       # Install JS deps + build WASM (rust:components dependency ensures
       # rust-src + wasm32 target are present even on cache hits).
       - name: Install JS deps + build WASM
+        shell: bash
         run: |
           mise run install
           mise run wasm
+
+      # Windows: pnpm's per-package symlinks are flaky on the runner. Force
+      # a fresh install with --shamefully-hoist as a CLI flag (the .npmrc
+      # node-linker=hoisted setting alone wasn't enough), then verify tsc
+      # is reachable. If this still doesn't work the next move is a
+      # prebuild-js job on Linux that uploads an artifact.
+      - name: Windows — force flat node_modules
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mise exec -- pnpm install --shamefully-hoist
+          echo "=== Verify tsc is reachable ==="
+          ls node_modules/.bin/tsc.cmd node_modules/.bin/tsc 2>&1 | head -5
+          mise exec -- pnpm exec tsc --version 2>&1 | head -3
 
       # Build only what apps/desktop transitively depends on. Building the
       # whole workspace (including standalone @ifc-lite/viewer with cesium
