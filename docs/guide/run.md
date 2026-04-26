@@ -77,7 +77,32 @@ See the [CLI guide](cli.md) for the complete command reference.
 
 Native Rust HTTP server — hand it an IFC file, get back parsed entities + Parquet-encoded geometry. Runs the same parser as the WASM build, plus Parquet streaming and disk caching for repeat requests.
 
-### Pre-built binary
+### Install via mise (recommended — auto-resolves your platform)
+
+Add to `.mise.toml`:
+
+```toml
+[tools."http:ifc-lite-server"]
+version = "0.1.0"
+
+[tools."http:ifc-lite-server".platforms]
+macos-arm64 = { url = "https://pub-889dce91ad7e4605b1fea650ae559d3f.r2.dev/server/v{{version}}/ifc-lite-server-darwin-arm64.tar.gz" }
+macos-x64   = { url = "https://pub-889dce91ad7e4605b1fea650ae559d3f.r2.dev/server/v{{version}}/ifc-lite-server-darwin-x64.tar.gz" }
+linux-arm64 = { url = "https://pub-889dce91ad7e4605b1fea650ae559d3f.r2.dev/server/v{{version}}/ifc-lite-server-linux-arm64.tar.gz" }
+linux-x64   = { url = "https://pub-889dce91ad7e4605b1fea650ae559d3f.r2.dev/server/v{{version}}/ifc-lite-server-linux-x64.tar.gz" }
+windows-x64 = { url = "https://pub-889dce91ad7e4605b1fea650ae559d3f.r2.dev/server/v{{version}}/ifc-lite-server-win32-x64.zip" }
+```
+
+Then:
+
+```bash
+mise install                       # downloads correct binary for your OS
+mise exec -- ifc-lite-server       # binary in PATH for this project
+```
+
+Same artifacts hosted on Cloudflare R2 (no egress cost, edge-cached globally). `mise upgrade` pulls newer versions automatically when you bump the `version` field.
+
+### Pre-built binary (manual download)
 
 Download from [GitHub Releases](https://github.com/joeblew999/ifc-lite/releases/latest) — produced by `.github/workflows/server-binaries.yml`:
 
