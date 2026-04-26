@@ -65,6 +65,9 @@ rust = "nightly-2025-11-15"
 "aqua:jdx/pitchfork" = "2"
 # Cloudflare CLI for deploy:web / deploy:embed
 "npm:wrangler" = "4"
+# Bun: kept available for experiments (was tried for build:cli-bin, see
+# note below the build:cli task). Not used by any task currently.
+bun = "1"
 # fnox: secrets manager by jdx (same author as mise). Encrypts secrets at
 # rest with age (using your SSH key as the identity, gated by Touch ID if
 # you ssh-add --apple-use-keychain). Encrypted values live in
@@ -176,18 +179,42 @@ run = "turbo build --filter @ifc-lite/viewer-embed"
 depends = ["wasm"]
 
 [tasks."build:desktop"]
-description = "Tauri desktop build for the current platform (apps/desktop → src-tauri/target/release/bundle/)"
+description = "Tauri desktop build for the current platform (no specific target). For CI/cross-arch use build:desktop-target."
 run = "pnpm --filter @ifc-lite/desktop exec tauri build"
 depends = ["wasm"]
+
+[tasks."build:desktop-target"]
+description = "Tauri build for an explicit Rust triple, with macOS ad-hoc sign baked in. Usage: mise run build:desktop-target -- aarch64-apple-darwin"
+depends = ["wasm"]
+run = """
+TARGET="${1:?usage: mise run build:desktop-target -- <rust-triple>}"
+EXTRA=""
+case "$TARGET" in
+  *-apple-darwin)
+    EXTRA="--config src-tauri/tauri.macos-adhoc.json"
+    ;;
+esac
+pnpm --filter @ifc-lite/desktop exec tauri build --target "$TARGET" $EXTRA
+"""
 
 [tasks."build:server"]
 description = "Rust server release binary (target/release/ifc-lite-server)"
 run = "cargo build --release --package ifc-lite-server"
 
 [tasks."build:cli"]
-description = "CLI bundle (packages/cli → dist/)"
+description = "CLI JS bundle (packages/cli → dist/index.js)"
 run = "turbo build --filter @ifc-lite/cli"
 depends = ["wasm"]
+
+# NOTE: Standalone CLI binaries via bun --compile attempted and reverted.
+# bun's static analysis of .d.ts files trips on a stale export resolution
+# in @ifc-lite/parser (imports parseIfcx + detectFormat from @ifc-lite/ifcx
+# whose .d.ts bun won't parse correctly even after rebuild). Path forward
+# either needs an upstream fix to parser/ifcx exports OR a switch to
+# Node SEA (experimental). For now the canonical install is via mise's
+# npm backend, which works today:
+#
+#   mise use -g npm:@ifc-lite/cli
 
 [tasks."build:all"]
 description = "Build every shippable target: web + embed + desktop + server + cli"
