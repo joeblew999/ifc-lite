@@ -51,14 +51,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macos-14 (free Apple Silicon, 7GB RAM). Earlier OOM was from
-          # building the whole workspace incl. @ifc-lite/viewer; now filtered
-          # to just apps/desktop's deps so 7GB is plenty. (macos-14-large
-          # is paid and your account didn't have spending limit configured.)
-          - target: macos-universal
+          # Per-arch Mac builds. Universal target requires lipo + signed
+          # arch components, which needs an Apple Developer cert we don't
+          # have. Single-arch with ad-hoc signing (signingIdentity: "-")
+          # works without a cert. Apple Silicon covers ~95% of Mac users
+          # in 2026; Intel kept for the long-tail.
+          - target: macos-arm64
             os: macos-14
-            rust-targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
-            tauri-args: '--target universal-apple-darwin'
+            rust-targets: 'aarch64-apple-darwin'
+            tauri-args: '--target aarch64-apple-darwin --config {"bundle":{"macOS":{"signingIdentity":"-"}}}'
+          - target: macos-x64
+            os: macos-14
+            rust-targets: 'x86_64-apple-darwin'
+            tauri-args: '--target x86_64-apple-darwin --config {"bundle":{"macOS":{"signingIdentity":"-"}}}'
           - target: windows-x64
             os: windows-latest
             rust-targets: 'x86_64-pc-windows-msvc'
@@ -161,13 +166,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          extra=""
-          if [[ -z "$APPLE_CERTIFICATE" && "${{ runner.os }}" == "macOS" ]]; then
-            # No signing identity available — disable codesign so the bundle
-            # step doesn't try to import an empty cert.
-            extra='--config {"bundle":{"macOS":{"signingIdentity":null}}}'
-          fi
-          mise exec -- pnpm --filter @ifc-lite/desktop exec tauri build ${{ matrix.tauri-args }} $extra
+          # macOS signing identity is set per-matrix via tauri-args
+          # (signingIdentity:"-" = ad-hoc sign, no cert required).
+          mise exec -- pnpm --filter @ifc-lite/desktop exec tauri build ${{ matrix.tauri-args }}
 
       # Attach to release on `release: published`, otherwise just upload as artifact.
       - name: Attach bundles to release
@@ -176,13 +177,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Find every produced bundle (.dmg / .msi / .AppImage / .deb).
+          # Find every produced bundle, including the .tar.gz / .zip
+          # updater payloads (createUpdaterArtifacts: true) and their .sig
+          # files. Tauri's auto-updater consumes the *.tar.gz / *.zip;
+          # human users grab the .dmg / .msi / .AppImage / .deb.
           shopt -s nullglob globstar
           files=(
             target/**/release/bundle/dmg/*.dmg
             target/**/release/bundle/msi/*.msi
             target/**/release/bundle/appimage/*.AppImage
             target/**/release/bundle/deb/*.deb
+            target/**/release/bundle/macos/*.app.tar.gz
+            target/**/release/bundle/macos/*.app.tar.gz.sig
+            target/**/release/bundle/appimage/*.AppImage.tar.gz
+            target/**/release/bundle/appimage/*.AppImage.tar.gz.sig
+            target/**/release/bundle/msi/*.msi.zip
+            target/**/release/bundle/msi/*.msi.zip.sig
           )
           if (( ${#files[@]} == 0 )); then
             echo "no bundles produced — check tauri build step" >&2
@@ -201,4 +211,10 @@ jobs:
             target/*/release/bundle/msi/*.msi
             target/*/release/bundle/appimage/*.AppImage
             target/*/release/bundle/deb/*.deb
+            target/*/release/bundle/macos/*.app.tar.gz
+            target/*/release/bundle/macos/*.app.tar.gz.sig
+            target/*/release/bundle/appimage/*.AppImage.tar.gz
+            target/*/release/bundle/appimage/*.AppImage.tar.gz.sig
+            target/*/release/bundle/msi/*.msi.zip
+            target/*/release/bundle/msi/*.msi.zip.sig
           if-no-files-found: warn
