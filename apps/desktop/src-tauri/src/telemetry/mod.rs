@@ -3,13 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::cell::OnceCell;
-use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::thread;
 use std::time::Duration;
 
 use tauri_plugin_log::{fern, Target, TargetKind};
+use tokio::sync::mpsc;
+use tokio::time::interval;
 
 const INGEST_URL: &str =
     "https://ifc-lite-viewer.gedw99.workers.dev/api/v0/events";
@@ -48,71 +47,47 @@ pub fn build_plugin<R: tauri::Runtime>(
     let os: &'static str = std::env::consts::OS;
     let arch: &'static str = std::env::consts::ARCH;
 
-    let (tx, rx) = mpsc::channel::<Msg>();
+    // unbounded so the fern closure (sync context) never blocks.
+    let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
 
     // Stash a sender for the panic hook (registered in lib.rs).
     let panic_tx = tx.clone();
     PANIC_TX.with(|cell| { let _ = cell.set(panic_tx); });
 
-    thread::spawn(move || {
-        let client = reqwest::blocking::Client::builder()
+    tauri::async_runtime::spawn(async move {
+        let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
-            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+            .unwrap_or_default();
 
         let mut batch: Vec<Event> = Vec::new();
-
-        // Attempt to ship batch + any persisted offline events.
-        // Returns true on success, false if offline (events written to queue).
-        let ship = |client: &reqwest::blocking::Client,
-                    batch: &mut Vec<Event>,
-                    queue_path: &PathBuf| {
-            if batch.is_empty() {
-                return;
-            }
-            // Prepend any events that failed to ship in a previous run.
-            let mut to_send = drain_queue(queue_path);
-            to_send.append(batch);
-
-            match client.post(INGEST_URL).json(&to_send).send() {
-                Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 204 => {
-                    // Online — queue is now empty, batch shipped.
-                }
-                _ => {
-                    // Offline or server error — persist for next attempt.
-                    persist_queue(&to_send, queue_path);
-                    *batch = Vec::new();
-                }
-            }
-            batch.clear();
-        };
+        let mut ticker = interval(Duration::from_secs(BATCH_SECS));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
-            match rx.recv_timeout(Duration::from_secs(BATCH_SECS)) {
-                Ok(Msg::Event(event)) => {
-                    batch.push(event);
-                    while let Ok(msg) = rx.try_recv() {
-                        match msg {
-                            Msg::Event(e) => batch.push(e),
-                            Msg::FlushNow(e) => { batch.push(e); ship(&client, &mut batch, &queue_path); }
+            tokio::select! {
+                msg = rx.recv() => {
+                    match msg {
+                        None => {
+                            // Channel closed — do a final flush and exit.
+                            ship(&client, &mut batch, &queue_path).await;
+                            break;
                         }
-                        if batch.len() >= BATCH_MAX { ship(&client, &mut batch, &queue_path); }
+                        Some(Msg::Event(event)) => {
+                            batch.push(event);
+                            if batch.len() >= BATCH_MAX {
+                                ship(&client, &mut batch, &queue_path).await;
+                            }
+                        }
+                        Some(Msg::FlushNow(event)) => {
+                            batch.push(event);
+                            ship(&client, &mut batch, &queue_path).await;
+                        }
                     }
                 }
-                Ok(Msg::FlushNow(event)) => {
-                    batch.push(event);
-                    ship(&client, &mut batch, &queue_path);
+                _ = ticker.tick() => {
+                    ship(&client, &mut batch, &queue_path).await;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    ship(&client, &mut batch, &queue_path);
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    ship(&client, &mut batch, &queue_path);
-                    break;
-                }
-            }
-            if batch.len() >= BATCH_MAX {
-                ship(&client, &mut batch, &queue_path);
             }
         }
     });
@@ -146,11 +121,44 @@ pub fn build_plugin<R: tauri::Runtime>(
 }
 
 // ---------------------------------------------------------------------------
-// Offline queue — JSONL file, one serialised Event per line.
+// Ship helper — async, works on desktop and mobile.
+// The offline JSONL queue is desktop-only (mobile has no writable FS path).
+// ---------------------------------------------------------------------------
+
+async fn ship(client: &reqwest::Client, batch: &mut Vec<Event>, queue_path: &PathBuf) {
+    if batch.is_empty() {
+        return;
+    }
+
+    #[cfg(not(mobile))]
+    let mut to_send = drain_queue(queue_path);
+    #[cfg(mobile)]
+    let mut to_send: Vec<Event> = Vec::new();
+
+    to_send.append(batch);
+
+    match client.post(INGEST_URL).json(&to_send).send().await {
+        Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 204 => {
+            // Shipped — queue (if any) is now empty.
+        }
+        _ => {
+            // Offline or server error — persist for next attempt (desktop only).
+            #[cfg(not(mobile))]
+            persist_queue(&to_send, queue_path);
+        }
+    }
+    batch.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Offline queue — JSONL file, one serialised Event per line. Desktop-only.
 // Read drains the file (removes it). Write appends, capped at QUEUE_MAX.
 // ---------------------------------------------------------------------------
 
+#[cfg(not(mobile))]
 fn drain_queue(path: &PathBuf) -> Vec<Event> {
+    use std::io::BufRead;
+
     let Ok(file) = std::fs::File::open(path) else { return Vec::new() };
     let events: Vec<Event> = std::io::BufReader::new(file)
         .lines()
@@ -161,7 +169,10 @@ fn drain_queue(path: &PathBuf) -> Vec<Event> {
     events
 }
 
+#[cfg(not(mobile))]
 fn persist_queue(events: &[Event], path: &PathBuf) {
+    use std::io::Write;
+
     // Read existing queued events, append new ones, cap at QUEUE_MAX.
     let mut existing = drain_queue(path);
     existing.extend_from_slice(events);
@@ -185,12 +196,12 @@ fn persist_queue(events: &[Event], path: &PathBuf) {
 // ---------------------------------------------------------------------------
 
 thread_local! {
-    static PANIC_TX: OnceCell<mpsc::Sender<Msg>> = const { OnceCell::new() };
+    static PANIC_TX: OnceCell<mpsc::UnboundedSender<Msg>> = const { OnceCell::new() };
 }
 
 /// Register as `std::panic::set_hook(Box::new(telemetry::on_panic))`.
 /// Ships the panic message then blocks the panicking thread for PANIC_FLUSH_WAIT
-/// so the shipper thread can complete its POST before the process exits.
+/// so the shipper task can complete its POST before the process exits.
 pub fn on_panic(info: &std::panic::PanicHookInfo<'_>) {
     PANIC_TX.with(|cell| {
         if let Some(tx) = cell.get() {
@@ -207,5 +218,5 @@ pub fn on_panic(info: &std::panic::PanicHookInfo<'_>) {
             let _ = tx.send(Msg::FlushNow(event));
         }
     });
-    thread::sleep(PANIC_FLUSH_WAIT);
+    std::thread::sleep(PANIC_FLUSH_WAIT);
 }
