@@ -181,7 +181,8 @@ jobs:
         run: |
           # SSOT: same task local devs run. The task knows to layer the
           # macOS ad-hoc sign config onto *-apple-darwin triples.
-          mise run build:desktop-target -- ${{ matrix.rust-target }}
+          # mise's `bash -c` shell drops args after --, so use env var.
+          TARGET="${{ matrix.rust-target }}" mise run build:desktop-target
 
       # Attach to release on `release: published`, otherwise just upload as artifact.
       - name: Attach bundles to release

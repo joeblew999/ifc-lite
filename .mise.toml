@@ -76,14 +76,13 @@ rust = "nightly-2025-11-15"
 # Bun: kept available for experiments (was tried for build:cli-bin, see
 # note below the build:cli task). Not used by any task currently.
 bun = "1.3"
-# fnox: secrets manager by jdx (same author as mise). Encrypts secrets at
-# rest with age (using your SSH key as the identity, gated by Touch ID if
-# you ssh-add --apple-use-keychain). Encrypted values live in
-# ~/.config/fnox/config.toml — globally accessible to every project,
-# safe to commit/share since they're useless without the private key.
+# fnox: secrets manager by jdx (same author as mise). All secrets are
+# stored in the macOS Keychain (service=fnox) via fnox's `keychain`
+# provider. ~/.config/fnox/config.toml maps secret names to keychain
+# entries — no encrypted blobs in the file. CI doesn't run fnox; it
+# reads secrets injected as env vars from GitHub Actions repo secrets,
+# pushed there by `mise run secrets:sync-github` from a dev machine.
 "github:jdx/fnox" = "1.23"
-# age: CLI used to generate / re-encrypt the fnox master key.
-"aqua:FiloSottile/age" = "1"
 # GitHub CLI: used by secrets:sync-github + scripts/sync-github-secrets.sh
 # and by secrets:status. Pinning here keeps mise as the SSOT for tools.
 "aqua:cli/cli" = "2"
@@ -95,28 +94,6 @@ bun = "1.3"
 
 [env]
 # pnpm is managed via corepack (bundled with node)
-
-# fnox: dedicated age private key, stored in macOS Keychain.
-#   - service=fnox account=age-key
-#   - Pulled on every mise activation via the security CLI
-#   - Decoupled from your SSH key (independent rotation, separate compromise
-#     surface). If you `security delete-generic-password -s fnox`, fnox loses
-#     the ability to decrypt — same as losing any key file.
-# Public key (the recipient) is in ~/.config/fnox/config.toml.
-#
-# `|| echo ''` makes the template degrade gracefully on hosts without the
-# Keychain entry (CI runners, fresh machines). fnox just can't decrypt
-# without the key — but CI doesn't need to (it reads secrets from GitHub
-# Actions repo settings, set there by `mise run secrets:sync-github`).
-# Static path to the age private key. Living in ~/.config/fnox/age.key
-# (mode 600). macOS Keychain still holds the canonical copy; the file is
-# a working copy mise can read without dynamic templates (those kept
-# breaking on edge cases).
-#
-# To rotate or restore on a new machine:
-#   security find-generic-password -s fnox -a age-key -w \
-#     > ~/.config/fnox/age.key && chmod 600 ~/.config/fnox/age.key
-FNOX_AGE_KEY_FILE = "~/.config/fnox/age.key"
 
 [tasks.install]
 description = "Install JS dependencies (with safety nuke if a foreign package manager left artifacts)"
@@ -197,10 +174,13 @@ run = "pnpm --filter @ifc-lite/desktop exec tauri build"
 depends = ["wasm"]
 
 [tasks."build:desktop-target"]
-description = "Tauri build for an explicit Rust triple, with macOS ad-hoc sign baked in. Usage: mise run build:desktop-target -- aarch64-apple-darwin"
+description = "Tauri build for an explicit Rust triple, with macOS ad-hoc sign baked in. Usage: TARGET=aarch64-apple-darwin mise run build:desktop-target"
 depends = ["wasm"]
 run = """
-TARGET="${1:?usage: mise run build:desktop-target -- <rust-triple>}"
+# mise's `bash -c` shell does NOT bind args after `--` to $1/$2 — they get
+# appended to the script body as text instead (verified: argc=0 with -- foo).
+# Use TARGET env var instead. Same gotcha bit auth-service; see CLAUDE.md.
+TARGET="${TARGET:?usage: TARGET=<rust-triple> mise run build:desktop-target}"
 EXTRA=""
 case "$TARGET" in
   *-apple-darwin)
@@ -306,6 +286,58 @@ run = "bash scripts/sync-github-secrets.sh"
 [tasks."secrets:sync-github-dry"]
 description = "Dry-run of secrets:sync-github (show plan, change nothing)"
 run = "bash scripts/sync-github-secrets.sh --dry-run"
+
+[tasks."secrets:migrate-to-keychain"]
+description = "Move every age-encrypted secret in fnox global config → OS keychain"
+# Idempotent. Discovers age-provider entries dynamically, so any future secret
+# added on age gets migrated next run. Non-age providers are left alone.
+# Operates on ~/.config/fnox/config.toml. After running, optionally enable
+# Touch ID per item via Keychain Access.app → Access Control on each item
+# under service=fnox (the keyring crate fnox uses can't set biometric ACLs
+# at creation, so it's a manual GUI step).
+run = """
+set -euo pipefail
+
+# Defensive: some IDE shells leak FNOX_AGE_KEY=undefined into the env
+# (anthropics/claude-code#53833). fnox prefers FNOX_AGE_KEY (inline value)
+# over FNOX_AGE_KEY_FILE, so the leaked string makes parsing fail with
+# "non-identity data on line 1".
+unset FNOX_AGE_KEY
+
+CONFIG="$HOME/.config/fnox/config.toml"
+
+if ! grep -qE '^\\[providers\\.keychain\\]|^keychain[[:space:]]*=' "$CONFIG"; then
+  echo "→ adding keychain provider to global config"
+  fnox provider add --global keychain keychain
+else
+  echo "✓ keychain provider already configured"
+fi
+
+# Extract every secret name currently using provider = "age".
+# Format: `KEY= { provider = "age", value = "..." }` on a single line.
+# Note: avoid ${ + # array-length syntax — Tera (mise's template engine)
+# treats `{`+`#` as the start of a comment block.
+AGE_LIST="$(grep -E '^[A-Z_][A-Z0-9_]*=[[:space:]]*\\{[[:space:]]*provider[[:space:]]*=[[:space:]]*"age"' "$CONFIG" | sed -E 's/^([A-Z_][A-Z0-9_]*)=.*/\\1/' || true)"
+
+if [ -z "$AGE_LIST" ]; then
+  echo "✓ no age-encrypted secrets remain — nothing to migrate"
+  exit 0
+fi
+
+COUNT=$(printf '%s\\n' "$AGE_LIST" | wc -l | tr -d ' ')
+echo "→ migrating $COUNT secret(s) from age → keychain"
+while IFS= read -r SECRET; do
+  [ -z "$SECRET" ] && continue
+  echo "→ $SECRET"
+  VALUE="$(fnox get "$SECRET")"
+  printf '%s' "$VALUE" | fnox set --global -p keychain "$SECRET"
+  unset VALUE
+done <<< "$AGE_LIST"
+
+echo
+echo "Done. Verify with: mise run secrets:sync-github-dry"
+echo "Once verified, delete ~/.config/fnox/age.key and remove [providers.age] from \\$CONFIG"
+"""
 
 [tasks."deploy:status"]
 description = "Print deployed URLs and check they're live (--fail makes non-2xx exit non-zero so CI catches broken deploys)"
