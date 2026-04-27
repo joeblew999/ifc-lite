@@ -17,6 +17,7 @@ on:
   push:
     branches:
       - main
+      - cloudflare/deploy   # active integration branch — triggers same as main pre-merge
     paths:
       - '.github/workflows/desktop-binaries-mise.yml'
       - 'apps/desktop/**'
