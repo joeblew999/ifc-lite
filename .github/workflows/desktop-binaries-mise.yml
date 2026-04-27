@@ -144,6 +144,25 @@ jobs:
       # tauri-action (any version) bundles JS with a top-level await that
       # crashes on Node 22 mise installs. Skip the action and call tauri
       # directly — fewer moving parts, same outcome.
+      # Hard-fail on a release build if the updater key is missing.
+      # Without this we'd ship unsigned bundles, then desktop clients would
+      # silently reject the update because the signature verification fails.
+      # Non-release builds (PRs, branch pushes) skip the check so contributors
+      # without secret access can still build artifacts locally.
+      - name: Assert Tauri signing key is set (release builds only)
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is not set on this repo."
+            echo "::error::Generate a key locally with 'mise exec -- tauri signer generate -w ~/.tauri/ifc-lite.key',"
+            echo "::error::then set it: cat ~/.tauri/ifc-lite.key | gh secret set TAURI_SIGNING_PRIVATE_KEY -R joeblew999/ifc-lite"
+            exit 1
+          fi
+          echo "✓ TAURI_SIGNING_PRIVATE_KEY is set ($(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | wc -c) chars)"
+
       - name: Build desktop bundle
         shell: bash
         env:
