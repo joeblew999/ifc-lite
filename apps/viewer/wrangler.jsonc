@@ -12,6 +12,20 @@
     // static-assets binding directly with no Worker invocation.
     "run_worker_first": ["/api/*"]
   },
+  // SSO via Service Binding to plat-trunk's auth-better-worker.
+  // The browser session cookie spans *.ubuntusoftware.net; the worker
+  // forwards it via env.AUTH.fetch() — internal CF call, no public hop.
+  // Both Workers must live in the same Cloudflare account for this to
+  // bind successfully (they do — same CLOUDFLARE_ACCOUNT_ID).
+  "services": [
+    { "binding": "AUTH", "service": "auth-better-worker" }
+  ],
+  // Custom domain — required because *.workers.dev subdomains can't share
+  // cookies (workers.dev is on the public suffix list). Must be on the
+  // same parent (.ubuntusoftware.net) as the auth Worker.
+  "routes": [
+    { "pattern": "ifc-lite.ubuntusoftware.net", "custom_domain": true }
+  ],
   "observability": {
     "enabled": true
   }

@@ -10,12 +10,16 @@
 //   /api/bsdd/<path>                    → proxy to api.bsdd.buildingsmart.org
 //   /api/epsg/<path>                    → proxy to epsg.io
 //   /api/updater/<target>/<arch>/<ver>  → Tauri updater manifest from latest GH release
+//   /api/me                             → current user via Service Binding to auth-better-worker
 //
 // Other /api/* paths (chat, geocode, streetview, server-parse) return 404
 // until ported.
 
 interface Env {
   ASSETS: Fetcher;
+  // Service Binding to plat-trunk's auth-better-worker. Internal CF call,
+  // no public DNS hop, no egress cost. Forwards the browser session cookie.
+  AUTH: Fetcher;
 }
 
 const PROXIES: Record<string, string> = {
@@ -34,6 +38,15 @@ export default {
     // describing the newer bundle to download.
     if (url.pathname.startsWith('/api/updater/')) {
       return handleUpdater(url.pathname);
+    }
+
+    // Current-user lookup via Service Binding to auth-better-worker.
+    // Cookie is sent by the browser (because of crossSubDomainCookies on
+    // .ubuntusoftware.net) and forwarded internally to auth-better.
+    if (url.pathname === '/api/me') {
+      const user = await getAuthUser(request, env);
+      if (!user) return new Response('not signed in', { status: 401 });
+      return Response.json(user);
     }
 
     for (const [prefix, target] of Object.entries(PROXIES)) {
@@ -60,6 +73,21 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+// Resolve the current session via Service Binding. The hostname in the URL
+// is irrelevant — Service Bindings route by service name, not DNS — but
+// the Request constructor needs a valid URL. Better Auth basePath is
+// `/auth/api`, so the get-session endpoint is `/auth/api/get-session`.
+async function getAuthUser(req: Request, env: Env): Promise<unknown | null> {
+  const authReq = new Request('https://auth-internal/auth/api/get-session', {
+    method: 'GET',
+    headers: { cookie: req.headers.get('cookie') ?? '' },
+  });
+  const res = await env.AUTH.fetch(authReq);
+  if (!res.ok) return null;
+  const data = await res.json() as { user?: unknown } | null;
+  return data?.user ?? null;
+}
 
 interface ReleaseAsset {
   name: string;
