@@ -51,6 +51,7 @@ nul
 
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
+.claude/*.lock
 
 # Local test models
 tests/models/local/*
