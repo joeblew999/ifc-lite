@@ -21,6 +21,8 @@ interface Env {
   // Service Binding to plat-trunk's auth-better-worker. Internal CF call,
   // no public DNS hop, no egress cost. Forwards the browser session cookie.
   AUTH: Fetcher;
+  // D1 telemetry store — ifc-lite-telemetry (d7f1c6da-e4c0-46d8-b1bd-2f434382c542)
+  TELEMETRY_DB: D1Database;
 }
 
 const PROXIES: Record<string, string> = {
@@ -39,6 +41,13 @@ export default {
     // describing the newer bundle to download.
     if (url.pathname.startsWith('/api/updater/')) {
       return handleUpdater(url.pathname);
+    }
+
+    // Desktop telemetry ingest — batched log events from the Tauri app.
+    // Workers Logs: each event is console.log'd → queryable via query_worker_observability MCP.
+    // D1: each event is inserted into `events` → queryable via d1_database_query MCP.
+    if (url.pathname === '/api/v0/events') {
+      return handleTelemetry(request, env);
     }
 
     // Current-user lookup via Service Binding to auth-better-worker.
@@ -85,6 +94,61 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+interface TelemetryEvent {
+  app_version: string;
+  os: string;
+  arch: string;
+  level: string;
+  message: string;
+  timestamp: string;
+  session_id: string;
+  device_id: string;
+}
+
+async function handleTelemetry(request: Request, env: Env): Promise<Response> {
+  if (request.method !== 'POST') return new Response(null, { status: 405 });
+
+  let events: TelemetryEvent[];
+  try {
+    const body = await request.json();
+    if (!Array.isArray(body) || body.length === 0) return new Response(null, { status: 204 });
+    if (body.length > 100) return new Response('too many events', { status: 413 });
+    events = body as TelemetryEvent[];
+  } catch {
+    return new Response('invalid json', { status: 400 });
+  }
+
+  // Workers Logs — 7-day hot window, queryable via query_worker_observability MCP.
+  for (const ev of events) {
+    console.log(JSON.stringify({ telemetry: true, ...ev }));
+  }
+
+  // D1 — permanent queryable store via d1_database_query MCP.
+  try {
+    const stmt = env.TELEMETRY_DB.prepare(
+      'INSERT INTO events (app_version, os, arch, level, message, timestamp, session_id, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    const batch = events.map((ev) =>
+      stmt.bind(
+        ev.app_version ?? '',
+        ev.os ?? '',
+        ev.arch ?? '',
+        ev.level ?? 'info',
+        (ev.message ?? '').slice(0, 2000),
+        ev.timestamp ?? new Date().toISOString(),
+        ev.session_id ?? '',
+        ev.device_id ?? '',
+      ),
+    );
+    await env.TELEMETRY_DB.batch(batch);
+  } catch (err) {
+    // Non-fatal — don't fail the desktop app if D1 is unavailable.
+    console.error('telemetry D1 insert failed', String(err));
+  }
+
+  return new Response(null, { status: 204 });
+}
 
 // Resolve the current session via Service Binding. The hostname in the URL
 // is irrelevant — Service Bindings route by service name, not DNS — but

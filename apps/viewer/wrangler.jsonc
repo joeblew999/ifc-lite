@@ -17,6 +17,16 @@
     // static-assets binding directly with no Worker invocation.
     "run_worker_first": ["/api/*"]
   },
+  // Telemetry storage — log events from the Tauri desktop app.
+  // Apply migration before first deploy: cd apps/viewer && wrangler d1 migrations apply ifc-lite-telemetry --remote
+  "d1_databases": [
+    {
+      "binding": "TELEMETRY_DB",
+      "database_name": "ifc-lite-telemetry",
+      "database_id": "d7f1c6da-e4c0-46d8-b1bd-2f434382c542",
+      "migrations_dir": "migrations"
+    }
+  ],
   // SSO via Service Binding to plat-trunk's auth-better-worker.
   // The browser session cookie spans *.ubuntusoftware.net; the worker
   // forwards it via env.AUTH.fetch() — internal CF call, no public hop.
