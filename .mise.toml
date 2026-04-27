@@ -187,6 +187,13 @@ case "$TARGET" in
     EXTRA="--config src-tauri/tauri.macos-adhoc.json"
     ;;
 esac
+# Updater payloads (.app.tar.gz / .AppImage.tar.gz / .msi.zip + .sig) need
+# TAURI_SIGNING_PRIVATE_KEY. If unset (typical local dev), layer in an
+# override that disables createUpdaterArtifacts so the build still succeeds.
+# CI sets the secret, so it produces the signed updater artifacts.
+if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+  EXTRA="$EXTRA --config src-tauri/tauri.no-updater.json"
+fi
 pnpm --filter @ifc-lite/desktop exec tauri build --target "$TARGET" $EXTRA
 """
 
@@ -336,7 +343,6 @@ done <<< "$AGE_LIST"
 
 echo
 echo "Done. Verify with: mise run secrets:sync-github-dry"
-echo "Once verified, delete ~/.config/fnox/age.key and remove [providers.age] from \\$CONFIG"
 """
 
 [tasks."deploy:status"]
