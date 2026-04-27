@@ -176,6 +176,7 @@ depends = ["wasm"]
 [tasks."build:desktop-target"]
 description = "Tauri build for an explicit Rust triple, with macOS ad-hoc sign baked in. Usage: TARGET=aarch64-apple-darwin mise run build:desktop-target"
 depends = ["wasm"]
+shell = "bash -c"   # Windows otherwise interprets the script via cmd.exe and chokes on '#' comments.
 run = """
 # mise's `bash -c` shell does NOT bind args after `--` to $1/$2 — they get
 # appended to the script body as text instead (verified: argc=0 with -- foo).
