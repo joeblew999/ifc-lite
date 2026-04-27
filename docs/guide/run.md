@@ -169,10 +169,10 @@ mise run secrets:status           # Doppler keys vs GitHub repo secrets
 mise run secrets:sync-github-dry  # dry-run the sync
 
 # Push
-mise run secrets:sync-github      # Doppler → GitHub repo Actions secrets
+mise run secrets:sync-github      # fnox → GitHub repo Actions secrets
 ```
 
-The mapping (Doppler key → GitHub secret name) lives in [`scripts/sync-github-secrets.sh`](https://github.com/joeblew999/ifc-lite/blob/main/scripts/sync-github-secrets.sh). Add lines as new workflows need new secrets. Optional desktop signing secrets (Apple cert, Tauri key) are commented out — uncomment when you have them in Doppler.
+Which secrets get synced is set by `FNOX_SYNC_KEYS` in `[env]` of `.mise.toml`. Add a key to that list when a new workflow needs it. The actual sync logic lives in `joeblew999/.github` (pulled via `task_config.includes`); fnox→GitHub same-name mapping by default.
 
 ## Local "everything running together"
 

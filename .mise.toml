@@ -83,8 +83,8 @@ bun = "1.3"
 # reads secrets injected as env vars from GitHub Actions repo secrets,
 # pushed there by `mise run secrets:sync-github` from a dev machine.
 "github:jdx/fnox" = "1.23"
-# GitHub CLI: used by secrets:sync-github + scripts/sync-github-secrets.sh
-# and by secrets:status. Pinning here keeps mise as the SSOT for tools.
+# GitHub CLI: used by the shared secrets:sync-github + secrets:status tasks.
+# Pinning here keeps mise as the SSOT for tools.
 "aqua:cli/cli" = "2"
 # Script dependencies (used by scripts that touch the CF API or sync
 # secrets). Without these in mise, fresh devs hit cryptic 'command
@@ -92,8 +92,18 @@ bun = "1.3"
 "aqua:jqlang/jq" = "1"
 "aqua:a8m/envsubst" = "1"
 
+# Pull shared secrets/fnox/build tasks from joeblew999/.github
+# Available: secrets:status, secrets:sync-github(-dry), secrets:migrate-to-keychain,
+#            fnox:init, rust:build/test/wasm-pack, wrangler:dev/deploy, cf:d1-migrate
+# Bump the ref deliberately; do NOT use main (drift on every fetch).
+[task_config]
+includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.2.0"]
+
 [env]
 # pnpm is managed via corepack (bundled with node)
+# Which fnox secrets get pushed to this repo's GitHub Actions secrets by
+# `mise run secrets:sync-github` (the shared task auto-detects the repo).
+FNOX_SYNC_KEYS = "CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID,TAURI_SIGNING_PRIVATE_KEY"
 
 [tasks.install]
 description = "Install JS dependencies (with safety nuke if a foreign package manager left artifacts)"
@@ -308,91 +318,12 @@ run = "wrangler deploy"
 description = "Deploy every CF target (web + embed). Server is NOT on CF — see top of file."
 depends = ["deploy:web", "deploy:embed"]
 
-# ---- Secrets (fnox → GitHub Actions) ----
-# https://fnox.jdx.dev
-# fnox is the local source of truth, backed by macOS Keychain via the
-# global `~/.config/fnox/config.toml`. These mise tasks render fnox's
-# values into GitHub repo Actions secrets so CI workflows can read them.
-# Set values once globally with: fnox set <KEY> --global --provider keychain
-
-[tasks."secrets:list"]
-description = "Show the canonical secret mapping (fnox key → GitHub secret name)"
-run = """
-echo "Defined in scripts/sync-github-secrets.sh MAPPING table:"
-grep -E '^\\s+"[A-Z_]+\\s+[A-Z_]+"' scripts/sync-github-secrets.sh | sed 's/^/  /'
-echo
-echo "Uncomment optional rows in scripts/sync-github-secrets.sh as new"
-echo "secrets are added to fnox (e.g. signing certs)."
-"""
-
-[tasks."secrets:status"]
-description = "Show fnox secrets vs GitHub repo secrets (read-only)"
-run = """
-echo "== fnox =="
-fnox list 2>/dev/null || echo "  (no config — run: fnox init --global)"
-echo
-echo "== GitHub repo secrets (joeblew999/ifc-lite) =="
-gh secret list --repo joeblew999/ifc-lite 2>/dev/null || echo "  (run: gh auth login)"
-"""
-
-[tasks."secrets:sync-github"]
-description = "Push secrets from fnox → GitHub Actions repo secrets"
-run = "bash scripts/sync-github-secrets.sh"
-
-[tasks."secrets:sync-github-dry"]
-description = "Dry-run of secrets:sync-github (show plan, change nothing)"
-run = "bash scripts/sync-github-secrets.sh --dry-run"
-
-[tasks."secrets:migrate-to-keychain"]
-description = "Move every age-encrypted secret in fnox global config → OS keychain"
-# Idempotent. Discovers age-provider entries dynamically, so any future secret
-# added on age gets migrated next run. Non-age providers are left alone.
-# Operates on ~/.config/fnox/config.toml. After running, optionally enable
-# Touch ID per item via Keychain Access.app → Access Control on each item
-# under service=fnox (the keyring crate fnox uses can't set biometric ACLs
-# at creation, so it's a manual GUI step).
-run = """
-set -euo pipefail
-
-# Defensive: some IDE shells leak FNOX_AGE_KEY=undefined into the env
-# (anthropics/claude-code#53833). fnox prefers FNOX_AGE_KEY (inline value)
-# over FNOX_AGE_KEY_FILE, so the leaked string makes parsing fail with
-# "non-identity data on line 1".
-unset FNOX_AGE_KEY
-
-CONFIG="$HOME/.config/fnox/config.toml"
-
-if ! grep -qE '^\\[providers\\.keychain\\]|^keychain[[:space:]]*=' "$CONFIG"; then
-  echo "→ adding keychain provider to global config"
-  fnox provider add --global keychain keychain
-else
-  echo "✓ keychain provider already configured"
-fi
-
-# Extract every secret name currently using provider = "age".
-# Format: `KEY= { provider = "age", value = "..." }` on a single line.
-# Note: avoid ${ + # array-length syntax — Tera (mise's template engine)
-# treats `{`+`#` as the start of a comment block.
-AGE_LIST="$(grep -E '^[A-Z_][A-Z0-9_]*=[[:space:]]*\\{[[:space:]]*provider[[:space:]]*=[[:space:]]*"age"' "$CONFIG" | sed -E 's/^([A-Z_][A-Z0-9_]*)=.*/\\1/' || true)"
-
-if [ -z "$AGE_LIST" ]; then
-  echo "✓ no age-encrypted secrets remain — nothing to migrate"
-  exit 0
-fi
-
-COUNT=$(printf '%s\\n' "$AGE_LIST" | wc -l | tr -d ' ')
-echo "→ migrating $COUNT secret(s) from age → keychain"
-while IFS= read -r SECRET; do
-  [ -z "$SECRET" ] && continue
-  echo "→ $SECRET"
-  VALUE="$(fnox get "$SECRET")"
-  printf '%s' "$VALUE" | fnox set --global -p keychain "$SECRET"
-  unset VALUE
-done <<< "$AGE_LIST"
-
-echo
-echo "Done. Verify with: mise run secrets:sync-github-dry"
-"""
+# Secrets (fnox → GitHub Actions). The actual task definitions are pulled
+# from joeblew999/.github via task_config.includes at the top of this file:
+#   secrets:status, secrets:sync-github(-dry), secrets:migrate-to-keychain,
+#   fnox:init.
+# Which secrets get pushed to this repo's GitHub Actions secrets is set by
+# FNOX_SYNC_KEYS in [env] above.
 
 [tasks."deploy:status"]
 description = "Print deployed URLs and check they're live (--fail makes non-2xx exit non-zero so CI catches broken deploys)"
