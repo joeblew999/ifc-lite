@@ -11,32 +11,50 @@
 
 import { check } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { invoke } from '@tauri-apps/api/core';
+
+async function trace(level: 'info' | 'warn' | 'error', message: string): Promise<void> {
+  console.log(`[updater/${level}] ${message}`);
+  try {
+    await invoke('log_updater_event', { level, message });
+  } catch {
+    // If the IPC itself fails, we still have console output above.
+  }
+}
 
 export async function checkForUpdatesOnStartup(): Promise<void> {
+  await trace('info', 'checkForUpdatesOnStartup: entered');
   try {
+    await trace('info', 'check(): calling tauri-plugin-updater check()');
     const update = await check();
+    await trace('info', `check(): returned, update=${update ? JSON.stringify({ version: update.version, date: update.date }) : 'null'}`);
+
     if (!update) {
-      console.log('[updater] up to date');
+      await trace('info', 'up to date — no update available');
       return;
     }
-    console.log(`[updater] new version available: ${update.version} (${update.date})`);
-    await update.downloadAndInstall((event) => {
+
+    await trace('info', `new version available: ${update.version} (${update.date})`);
+    await trace('info', 'downloadAndInstall(): starting');
+
+    await update.downloadAndInstall(async (event) => {
       switch (event.event) {
         case 'Started':
-          console.log(`[updater] download started, ${event.data.contentLength ?? '?'} bytes`);
+          await trace('info', `download started, contentLength=${event.data.contentLength ?? '?'}`);
           break;
         case 'Progress':
-          // Silent — could surface as a toast if you want UI feedback.
+          // High-frequency — skip tracing to avoid flooding D1.
           break;
         case 'Finished':
-          console.log('[updater] download complete, relaunching');
+          await trace('info', 'download finished');
           break;
       }
     });
+
+    await trace('info', 'downloadAndInstall(): complete, calling relaunch()');
     await relaunch();
   } catch (err) {
-    // Network failures, signature mismatches, missing endpoint — all log
-    // and continue rather than block app startup.
-    console.warn('[updater] check failed (non-fatal):', err);
+    const msg = err instanceof Error ? err.message : String(err);
+    await trace('error', `updater threw: ${msg}`);
   }
 }
