@@ -197,6 +197,54 @@ fi
 pnpm --filter @ifc-lite/desktop exec tauri build --target "$TARGET" $EXTRA
 """
 
+[tasks."install:desktop"]
+description = "Install the locally-built IFC-Lite Viewer.app to /Applications (macOS only). Run build:desktop-target first."
+run = """
+case "$(uname -s)" in
+  Darwin) ;;
+  *) echo "install:desktop is macOS only"; exit 1;;
+esac
+ARCH=$(uname -m); case "$ARCH" in arm64) TRIPLE=aarch64-apple-darwin;; x86_64) TRIPLE=x86_64-apple-darwin;; esac
+SRC="target/${TRIPLE}/release/bundle/macos/IFC-Lite Viewer.app"
+DST="/Applications/IFC-Lite Viewer.app"
+[ -d "$SRC" ] || { echo "✗ no bundle at $SRC — run 'TARGET=$TRIPLE mise run build:desktop-target' first"; exit 1; }
+[ -d "$DST" ] && { echo "→ removing existing $DST"; rm -rf "$DST"; }
+cp -R "$SRC" "$DST"
+echo "✓ installed: $DST"
+echo "  installed version: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$DST/Contents/Info.plist")"
+"""
+
+[tasks."launch:desktop"]
+description = "Open the installed IFC-Lite Viewer.app (macOS)."
+run = """
+APP="/Applications/IFC-Lite Viewer.app"
+[ -d "$APP" ] || { echo "✗ not installed; run 'mise run install:desktop' first"; exit 1; }
+open "$APP"
+echo "✓ launched"
+"""
+
+[tasks."updater:check"]
+description = "Simulate what the installed app sends to the updater endpoint. Shows whether an update would be offered. Usage: VERSION=1.1.6 mise run updater:check (defaults to installed version)"
+run = """
+APP="/Applications/IFC-Lite Viewer.app"
+if [ -d "$APP" ] && [ -z "${VERSION:-}" ]; then
+  VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")
+fi
+VERSION="${VERSION:?usage: VERSION=<x.y.z> mise run updater:check (or install the app first)}"
+ARCH=$(uname -m); case "$ARCH" in arm64) TARGET_ARCH=aarch64;; x86_64) TARGET_ARCH=x86_64;; *) TARGET_ARCH="$ARCH";; esac
+URL="https://ifc-lite-viewer.gedw99.workers.dev/api/updater/darwin/${TARGET_ARCH}/${VERSION}"
+echo "→ GET $URL"
+RESP=$(curl -sS -w '\\n%{http_code}' "$URL")
+CODE=$(printf '%s' "$RESP" | tail -1)
+BODY=$(printf '%s' "$RESP" | sed '$d')
+echo "→ HTTP $CODE"
+case "$CODE" in
+  204) echo "✓ no update — installed version is current";;
+  200) echo "↑ UPDATE OFFERED:"; printf '%s' "$BODY" | jq .;;
+  *)   echo "✗ unexpected response:"; printf '%s' "$BODY"; exit 1;;
+esac
+"""
+
 [tasks."build:server"]
 description = "Rust server release binary (target/release/ifc-lite-server)"
 run = "cargo build --release --package ifc-lite-server"
