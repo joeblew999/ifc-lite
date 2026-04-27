@@ -80,7 +80,7 @@ for entry in "${MAPPING[@]}"; do
     if $DRY_RUN; then
       echo "  ✓ $fkey → $gkey  (dry-run, would set ${#value} bytes)"
     else
-      if printf '%s' "$value" | gh secret set "$gkey" --repo "$REPO" --body - >/dev/null 2>&1; then
+      if printf '%s' "$value" | gh secret set "$gkey" --repo "$REPO" >/dev/null 2>&1; then
         echo "  ✓ $fkey → $gkey  (${#value} bytes)"
         ok=$((ok+1))
       else
