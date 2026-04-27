@@ -11,6 +11,7 @@
 //   /api/epsg/<path>                    → proxy to epsg.io
 //   /api/updater/<target>/<arch>/<ver>  → Tauri updater manifest from latest GH release
 //   /api/me                             → current user via Service Binding to auth-better-worker
+//   /api/me/org                         → current user's active org membership (org_id, role, etc) — null if no active org
 //
 // Other /api/* paths (chat, geocode, streetview, server-parse) return 404
 // until ported.
@@ -47,6 +48,17 @@ export default {
       const user = await getAuthUser(request, env);
       if (!user) return new Response('not signed in', { status: 401 });
       return Response.json(user);
+    }
+
+    // Active org membership (RBAC primitive). Returns the row from
+    // Better Auth's `member` table for the current session's active org:
+    //   { id, organizationId, userId, role, createdAt, ... }
+    // Returns 401 if not signed in, null body if signed in but no active
+    // org. Use `member.role` for role-based authz checks; use the
+    // organizationId as a tenant boundary for resource queries.
+    if (url.pathname === '/api/me/org') {
+      const member = await getOrgMember(request, env);
+      return Response.json(member);
     }
 
     for (const [prefix, target] of Object.entries(PROXIES)) {
@@ -87,6 +99,40 @@ async function getAuthUser(req: Request, env: Env): Promise<unknown | null> {
   if (!res.ok) return null;
   const data = await res.json() as { user?: unknown } | null;
   return data?.user ?? null;
+}
+
+// Resolve the current user's active org membership via Service Binding.
+// Better Auth's organization plugin endpoint: /auth/api/organization/get-active-member.
+// Returns the row from the `member` table for the active org:
+//   { id, organizationId, userId, role, createdAt, ... }
+// Use `member.role` for role-based authz checks. Returns null if the user
+// isn't signed in, or signed in but has no active org yet (just-signed-up
+// users have no orgs until they create one or accept an invite).
+//
+// Pattern for any future protected route:
+//   const member = await getOrgMember(request, env);
+//   if (!member) return new Response('not in any org', { status: 403 });
+//   if (member.role !== 'admin') return new Response('admin only', { status: 403 });
+async function getOrgMember(req: Request, env: Env): Promise<{
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: string;
+  createdAt?: string;
+} | null> {
+  const authReq = new Request('https://auth-internal/auth/api/organization/get-active-member', {
+    method: 'GET',
+    headers: { cookie: req.headers.get('cookie') ?? '' },
+  });
+  const res = await env.AUTH.fetch(authReq);
+  if (!res.ok) return null;
+  const data = await res.json();
+  // Better Auth returns the member object directly when there's an active org,
+  // or null when there isn't. Type-narrow defensively.
+  if (data && typeof data === 'object' && 'role' in data) {
+    return data as { id: string; organizationId: string; userId: string; role: string; createdAt?: string };
+  }
+  return null;
 }
 
 interface ReleaseAsset {
