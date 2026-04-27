@@ -10,6 +10,7 @@
 pub mod cache;
 pub mod file_dialog;
 pub mod ifc;
+pub mod updater_trace;
 mod types;
 
 pub use types::*;

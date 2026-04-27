@@ -20,6 +20,8 @@ use tauri::Emitter;
 /// Parse IFC buffer and return basic parse info (without geometry)
 #[tauri::command]
 pub async fn parse_ifc_buffer(buffer: Vec<u8>) -> Result<serde_json::Value, String> {
+    let start = Instant::now();
+    let file_bytes = buffer.len();
     let content = String::from_utf8(buffer).map_err(|e| format!("Invalid UTF-8: {}", e))?;
 
     let mut scanner = EntityScanner::new(&content);
@@ -42,6 +44,11 @@ pub async fn parse_ifc_buffer(buffer: Vec<u8>) -> Result<serde_json::Value, Stri
         }
     }
 
+    log::info!(
+        "ifc-parse-buffer: {}ms file_bytes={} entities={} schema={}",
+        start.elapsed().as_millis(), file_bytes, entity_count, schema_version
+    );
+
     Ok(serde_json::json!({
         "entityCount": entity_count,
         "schemaVersion": schema_version,
@@ -51,12 +58,19 @@ pub async fn parse_ifc_buffer(buffer: Vec<u8>) -> Result<serde_json::Value, Stri
 /// Process IFC buffer and return all geometry meshes
 #[tauri::command]
 pub async fn get_geometry(buffer: Vec<u8>) -> Result<GeometryResult, String> {
+    let start = Instant::now();
+    let file_bytes = buffer.len();
     let content = String::from_utf8(buffer).map_err(|e| format!("Invalid UTF-8: {}", e))?;
 
     let (meshes, _stats) = process_geometry(&content)?;
 
     let total_vertices: usize = meshes.iter().map(|m| m.positions.len() / 3).sum();
     let total_triangles: usize = meshes.iter().map(|m| m.indices.len() / 3).sum();
+
+    log::info!(
+        "ifc-geometry: {}ms file_bytes={} meshes={} vertices={} triangles={}",
+        start.elapsed().as_millis(), file_bytes, meshes.len(), total_vertices, total_triangles
+    );
 
     Ok(GeometryResult {
         meshes,
@@ -72,6 +86,7 @@ pub async fn get_geometry_streaming(
     buffer: Vec<u8>,
     window: tauri::Window,
 ) -> Result<GeometryStats, String> {
+    let file_bytes = buffer.len();
     let content = String::from_utf8(buffer).map_err(|e| format!("Invalid UTF-8: {}", e))?;
 
     let start = Instant::now();
@@ -198,6 +213,12 @@ pub async fn get_geometry_streaming(
     }
 
     let geometry_time = geometry_start.elapsed();
+
+    log::info!(
+        "ifc-geometry-streaming: total={}ms parse={}ms geometry={}ms file_bytes={} meshes={} vertices={} triangles={}",
+        start.elapsed().as_millis(), parse_time.as_millis(), geometry_time.as_millis(),
+        file_bytes, total_meshes, total_vertices, total_triangles
+    );
 
     Ok(GeometryStats {
         total_meshes,
