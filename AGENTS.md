@@ -70,3 +70,35 @@
 ## 9. Feedback Loop
 - If a pattern is confusing or repeatedly error-prone, call it out explicitly in your PR notes.
 - Prefer refactors that make the correct path the easiest path (single source of truth helpers, stricter types, fewer implicit fallbacks).
+
+## 10. Build / CI / deploy gotchas (re-litigated more than once — don't repeat)
+
+These are real bugs we hit + diagnosed during the Cloudflare deploy
+build-out. Each one cost real time. Spelled out so the next AI
+session doesn't redo the forensics from scratch. Same set applies
+to `joeblew999/auth-service` — see its `CLAUDE.md` for the canonical
+extended commentary.
+
+- **`gh secret set --body -` is a literal `-`, NOT a stdin marker.**
+  Per `gh secret set --help`: `-b, --body string` takes a literal
+  value. Symptom: CI deploy returns CF API 7003 "object identifier
+  invalid" because `CLOUDFLARE_ACCOUNT_ID` becomes literally `-`.
+  Fix: omit `--body` so gh reads stdin.
+- **mise's `shell = "bash -c"` doesn't pass positional args.** Args
+  after `--` get appended to the script body as text, not bound to
+  `$1`/`$2`. Use the `ENV=staging mise run X` env-var pattern.
+- **Wrangler 4.85.0 silently regressed `wrangler deploy --env`.**
+  Pinned to 4.84.1 in `[tools]`. Watch upstream for fix.
+- **`latest` for any tool is dangerous.** mise resolves it
+  differently across machines and over time. Pin every tool to a
+  specific minor at minimum.
+- **fnox provider is `age`, not `keychain`.** Encrypted with age,
+  key cached in macOS Keychain. fnox has NO `--stdin` flag; auto-reads
+  stdin when piped without a positional VALUE.
+- **pitchfork moved jdx → endevco/pitchfork.** mise's default
+  `pitchfork` alias still points at the old jdx repo. Use
+  `"github:endevco/pitchfork"` explicitly.
+- **Wrangler env inheritance is finicky.** Top-level `[assets]`,
+  `[vars]`, `[[d1_databases]]`, etc. do NOT inherit into
+  `[env.production]`. Always re-declare every binding under
+  `[env.production.*]`.
