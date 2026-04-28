@@ -84,6 +84,8 @@ jobs:
         with:
           install: true
           cache: true
+        env:
+          MISE_JOBS: "1"
 
       # NOTE on SSOT: rust-src + wasm32 component installation lives in the
       # `rust:components` mise task (.mise.toml). The `wasm` task depends on

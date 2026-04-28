@@ -86,6 +86,8 @@ jobs:
         with:
           install: true
           cache: true
+        env:
+          MISE_JOBS: "1"
 
       # Per-platform binary target. mise's rust toolchain ships with the
       # channel; platform-specific binary targets are workflow concerns,
