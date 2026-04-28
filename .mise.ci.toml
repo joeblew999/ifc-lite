@@ -1,0 +1,12 @@
+# CI overlay — loaded when MISE_ENV=ci (set in GitHub Actions workflows).
+# Overrides dev-only tools to "system" so mise skips installation.
+# "system" = use whatever is on PATH; if absent, no error, no install.
+# Required CI tools stay in .mise.toml and are installed as normal.
+[tools]
+bun = "system"
+java = "system"
+ruby = "system"
+"github:jdx/fnox" = "system"
+"aqua:cli/cli" = "system"
+"github:endevco/pitchfork" = "system"
+"cargo:usage-cli" = "system"
