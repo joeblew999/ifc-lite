@@ -208,6 +208,9 @@ EXTRA=""
 case "$TARGET" in
   *-apple-darwin)
     EXTRA="--config src-tauri/tauri.macos-adhoc.json"
+    # Tauri runs `security import` whenever APPLE_CERTIFICATE is set, even to "".
+    # GitHub Actions injects "" for unset secrets — unset them so Tauri skips cert import.
+    [ -z "${APPLE_CERTIFICATE:-}" ] && unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID || true
     ;;
 esac
 # Load signing credentials from fnox (macOS keychain) if not already in env.
