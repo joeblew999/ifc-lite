@@ -27,6 +27,15 @@
       "migrations_dir": "migrations"
     }
   ],
+  // R2 bucket for desktop release bundles. CI uploads updater payloads here
+  // on every published GitHub Release (releases/<tag>/<filename>).
+  // Worker serves them at /api/releases/<tag>/<filename>.
+  "r2_buckets": [
+    {
+      "binding": "RELEASES",
+      "bucket_name": "ifc-lite-bin"
+    }
+  ],
   // SSO via Service Binding to plat-trunk's auth-better-worker.
   // The browser session cookie spans *.ubuntusoftware.net; the worker
   // forwards it via env.AUTH.fetch() — internal CF call, no public hop.

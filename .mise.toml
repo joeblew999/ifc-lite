@@ -256,6 +256,34 @@ case "$CODE" in
 esac
 """
 
+[tasks."release:desktop-r2"]
+description = "Push locally-built updater bundles to R2 ifc-lite-bin/releases/<TAG>/. Run build:desktop-target first (with TAURI_SIGNING_PRIVATE_KEY set). Usage: TAG=v1.1.9 mise run release:desktop-r2"
+shell = "bash -c"
+run = """
+TAG="${TAG:?usage: TAG=v1.1.9 mise run release:desktop-r2}"
+shopt -s nullglob globstar
+uploaded=0
+for f in \
+  target/**/release/bundle/macos/*.app.tar.gz \
+  target/**/release/bundle/macos/*.app.tar.gz.sig \
+  target/**/release/bundle/appimage/*.AppImage.tar.gz \
+  target/**/release/bundle/appimage/*.AppImage.tar.gz.sig \
+  target/**/release/bundle/msi/*.msi.zip \
+  target/**/release/bundle/msi/*.msi.zip.sig; do
+  name=$(basename "$f")
+  key="releases/${TAG}/${name}"
+  case "$f" in *.sig) ct="text/plain";; *) ct="application/octet-stream";; esac
+  echo "R2 ← ${key}  (${ct})"
+  wrangler r2 object put "ifc-lite-bin/${key}" --file "$f" --content-type "$ct"
+  uploaded=$((uploaded+1))
+done
+if [ "$uploaded" -eq 0 ]; then
+  echo "✗ no updater bundles found — run 'TAURI_SIGNING_PRIVATE_KEY=... TARGET=<triple> mise run build:desktop-target' first" >&2
+  exit 1
+fi
+echo "✓ uploaded $uploaded file(s) to R2 under releases/${TAG}/"
+"""
+
 [tasks."build:server"]
 description = "Rust server release binary (target/release/ifc-lite-server)"
 run = "cargo build --release --package ifc-lite-server"

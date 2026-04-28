@@ -214,6 +214,41 @@ jobs:
           fi
           gh release upload "${{ github.event.release.tag_name }}" --clobber "${files[@]}"
 
+      # Push updater bundles (*.tar.gz / *.zip + *.sig) to R2 so the Worker
+      # can serve downloads from Cloudflare edge instead of GitHub CDN.
+      # Requires CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN secrets
+      # (token needs R2:Edit on ifc-lite-bin).
+      # Push updater bundles to R2 so the Worker can serve downloads from
+      # Cloudflare edge. wrangler is installed by mise-action above.
+      # Secrets: CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (R2:Edit on ifc-lite-bin).
+      # Both are synced from fnox via `mise run secrets:sync-github`.
+      - name: Push updater bundles to R2
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          shopt -s nullglob globstar
+          for f in \
+            target/**/release/bundle/macos/*.app.tar.gz \
+            target/**/release/bundle/macos/*.app.tar.gz.sig \
+            target/**/release/bundle/appimage/*.AppImage.tar.gz \
+            target/**/release/bundle/appimage/*.AppImage.tar.gz.sig \
+            target/**/release/bundle/msi/*.msi.zip \
+            target/**/release/bundle/msi/*.msi.zip.sig; do
+            name=$(basename "$f")
+            key="releases/${TAG}/${name}"
+            # Set content-type so the Worker can forward it faithfully.
+            case "$f" in
+              *.sig) ct="text/plain";;
+              *)     ct="application/octet-stream";;
+            esac
+            echo "R2 ← ${key}  (${ct})"
+            wrangler r2 object put "ifc-lite-bin/${key}" --file "$f" --content-type "$ct"
+          done
+
       # For non-release runs, save artifacts so PRs can be downloaded.
       - name: Upload bundles (PR / push)
         if: github.event_name != 'release'

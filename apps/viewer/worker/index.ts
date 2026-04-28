@@ -9,7 +9,8 @@
 //
 //   /api/bsdd/<path>                    → proxy to api.bsdd.buildingsmart.org
 //   /api/epsg/<path>                    → proxy to epsg.io
-//   /api/updater/<target>/<arch>/<ver>  → Tauri updater manifest from latest GH release
+//   /api/updater/<target>/<arch>/<ver>  → Tauri updater manifest (R2 URLs, GH API for version)
+//   /api/releases/<tag>/<filename>      → streams updater bundle from R2 (ifc-lite-bin)
 //   /api/me                             → current user via Service Binding to auth-better-worker
 //   /api/me/org                         → current user's active org membership (org_id, role, etc) — null if no active org
 //
@@ -23,6 +24,11 @@ interface Env {
   AUTH: Fetcher;
   // D1 telemetry store — ifc-lite-telemetry (d7f1c6da-e4c0-46d8-b1bd-2f434382c542)
   TELEMETRY_DB: D1Database;
+  // R2 bucket for desktop release bundles — ifc-lite-bin.
+  // Objects stored at releases/<tag>/<filename>, e.g.:
+  //   releases/v1.1.9/IFC-Lite-Viewer-aarch64-apple-darwin.app.tar.gz
+  //   releases/v1.1.9/IFC-Lite-Viewer-aarch64-apple-darwin.app.tar.gz.sig
+  RELEASES: R2Bucket;
 }
 
 const PROXIES: Record<string, string> = {
@@ -40,7 +46,14 @@ export default {
     // current version; we return either 204 (no update) or a JSON manifest
     // describing the newer bundle to download.
     if (url.pathname.startsWith('/api/updater/')) {
-      return handleUpdater(url.pathname);
+      return handleUpdater(request, url.pathname, env);
+    }
+
+    // R2 release-bundle passthrough. CI uploads updater payloads to the
+    // ifc-lite-bin bucket under releases/<tag>/<filename>. The desktop app
+    // downloads its update from here instead of GitHub CDN.
+    if (url.pathname.startsWith('/api/releases/')) {
+      return handleReleasesDownload(url.pathname, env);
     }
 
     // Desktop telemetry ingest — batched log events from the Tauri app.
@@ -204,13 +217,29 @@ interface ReleaseAsset {
   browser_download_url: string;
 }
 
-async function handleUpdater(pathname: string): Promise<Response> {
+async function handleReleasesDownload(pathname: string, env: Env): Promise<Response> {
+  // pathname = /api/releases/<tag>/<filename>
+  // Strips the /api/releases/ prefix to get the R2 key: releases/<tag>/<filename>
+  const r2Key = 'releases/' + pathname.replace(/^\/api\/releases\//, '');
+  const obj = await env.RELEASES.get(r2Key);
+  if (!obj) return new Response('not found', { status: 404 });
+
+  const headers = new Headers();
+  headers.set('content-type', obj.httpMetadata?.contentType ?? 'application/octet-stream');
+  if (obj.size) headers.set('content-length', String(obj.size));
+  headers.set('etag', obj.httpEtag);
+  // Allow the desktop app (different origin) to download directly.
+  headers.set('access-control-allow-origin', '*');
+  return new Response(obj.body, { headers });
+}
+
+async function handleUpdater(request: Request, pathname: string, env: Env): Promise<Response> {
   // pathname = /api/updater/<target>/<arch>/<current_version>
   const parts = pathname.replace(/^\/api\/updater\//, '').split('/');
   if (parts.length < 3) return new Response('bad request', { status: 400 });
   const [target, arch, currentVersion] = parts;
 
-  // Fetch latest release from GitHub.
+  // Fetch latest release from GitHub to get the version + asset list.
   const ghResp = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, {
     headers: { 'user-agent': 'ifc-lite-updater', 'accept': 'application/vnd.github+json' },
   });
@@ -229,16 +258,35 @@ async function handleUpdater(pathname: string): Promise<Response> {
   const wanted = pickAssetForPlatform(release.assets, platform);
   if (!wanted) return new Response(null, { status: 204 });
 
-  const sigAsset = release.assets.find((a) => a.name === `${wanted.name}.sig`);
-  const signature = sigAsset
-    ? await fetch(sigAsset.browser_download_url).then((r) => (r.ok ? r.text() : ''))
-    : '';
+  // Prefer R2 for the .sig file (no GitHub CDN hop) and build an R2-backed
+  // download URL. Fall back to GitHub CDN if the R2 object isn't there yet
+  // (e.g. first release before CI has uploaded, or CI failure mid-run).
+  const r2SigKey = `releases/${release.tag_name}/${wanted.name}.sig`;
+  const sigObj = await env.RELEASES.get(r2SigKey);
+
+  let signature: string;
+  let downloadUrl: string;
+
+  if (sigObj) {
+    // R2 has the bundle — use the Worker-proxied R2 URL so the desktop app
+    // downloads via our edge rather than GitHub CDN.
+    signature = await sigObj.text();
+    const base = new URL(request.url);
+    downloadUrl = `${base.origin}/api/releases/${release.tag_name}/${wanted.name}`;
+  } else {
+    // R2 not yet populated — fall back to GitHub CDN URLs.
+    const sigAsset = release.assets.find((a) => a.name === `${wanted.name}.sig`);
+    signature = sigAsset
+      ? await fetch(sigAsset.browser_download_url).then((r) => (r.ok ? r.text() : ''))
+      : '';
+    downloadUrl = wanted.browser_download_url;
+  }
 
   return Response.json({
     version: latestVersion,
     pub_date: release.published_at,
     notes: release.body?.slice(0, 500) ?? '',
-    url: wanted.browser_download_url,
+    url: downloadUrl,
     signature,
   });
 }
