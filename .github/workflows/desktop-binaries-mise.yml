@@ -222,64 +222,17 @@ jobs:
       # Cloudflare edge. wrangler is installed by mise-action above.
       # Secrets: CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (R2:Edit on ifc-lite-bin).
       # Both are synced from fnox via `mise run secrets:sync-github`.
+      # SSOT: same mise task local devs run. No duplicated upload logic here.
       - name: Push updater bundles to R2
         if: github.event_name == 'release'
         shell: bash
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          shopt -s nullglob globstar
-          for f in \
-            target/**/release/bundle/macos/*.app.tar.gz \
-            target/**/release/bundle/macos/*.app.tar.gz.sig \
-            target/**/release/bundle/appimage/*.AppImage.tar.gz \
-            target/**/release/bundle/appimage/*.AppImage.tar.gz.sig \
-            target/**/release/bundle/msi/*.msi.zip \
-            target/**/release/bundle/msi/*.msi.zip.sig; do
-            name=$(basename "$f")
-            key="releases/${TAG}/${name}"
-            # Set content-type so the Worker can forward it faithfully.
-            case "$f" in
-              *.sig) ct="text/plain";;
-              *)     ct="application/octet-stream";;
-            esac
-            echo "R2 ← ${key}  (${ct})"
-            wrangler r2 object put "ifc-lite-bin/${key}" --file "$f" --content-type "$ct"
-          done
-          # Write a per-platform manifest so the Worker knows the exact filename
-          # for this platform. Each matrix job writes its own file — no race.
-          # Platform key derived from the rust triple via the same alias table
-          # the Worker uses in pickAssetForPlatform.
-          case "${{ matrix.rust-target }}" in
-            aarch64-apple-darwin)   PLAT="darwin-aarch64";;
-            x86_64-apple-darwin)    PLAT="darwin-x86_64";;
-            x86_64-unknown-linux-*) PLAT="linux-x86_64";;
-            x86_64-pc-windows-*)    PLAT="windows-x86_64";;
-          esac
-          # Find the bundle file for this platform (non-.sig)
-          BUNDLE=""
-          for f in \
-            target/**/release/bundle/macos/*.app.tar.gz \
-            target/**/release/bundle/appimage/*.AppImage.tar.gz \
-            target/**/release/bundle/msi/*.msi.zip; do
-            [[ -f "$f" ]] && BUNDLE=$(basename "$f") && break
-          done
-          if [ -n "$BUNDLE" ] && [ -n "$PLAT" ]; then
-            VERSION="${TAG#v}"
-            NOTES=$(printf '%s' '${{ github.event.release.body }}' | head -c 500)
-            printf '{"version":"%s","pub_date":"%s","notes":%s,"filename":"%s"}\n' \
-              "$VERSION" \
-              "${{ github.event.release.published_at }}" \
-              "$(printf '%s' "$NOTES" | jq -Rs .)" \
-              "$BUNDLE" \
-              > /tmp/platform-manifest.json
-            echo "R2 ← releases/latest-${PLAT}.json  (${BUNDLE})"
-            cat /tmp/platform-manifest.json
-            wrangler r2 object put "ifc-lite-bin/releases/latest-${PLAT}.json" \
-              --file /tmp/platform-manifest.json --content-type "application/json"
-          fi
+          TAG: ${{ github.event.release.tag_name }}
+          PUB_DATE: ${{ github.event.release.published_at }}
+          RELEASE_NOTES: ${{ github.event.release.body }}
+        run: mise run release:desktop-r2
 
       # For non-release runs, save artifacts so PRs can be downloaded.
       - name: Upload bundles (PR / push)

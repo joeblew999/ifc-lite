@@ -265,12 +265,16 @@ esac
 """
 
 [tasks."release:desktop-r2"]
-description = "Push locally-built updater bundles to R2 and write per-platform manifests. Build first with signing (auto-pulled from fnox). Usage: TAG=v1.1.9 mise run release:desktop-r2"
+description = "Push updater bundles to R2 and write per-platform manifests. Works identically locally and in CI — SSOT for R2 uploads. Optional: RELEASE_NOTES, PUB_DATE (ISO8601). Usage: TAG=v1.1.9 mise run release:desktop-r2"
 shell = "bash -c"
 run = """
 TAG="${TAG:?usage: TAG=v1.1.9 mise run release:desktop-r2}"
 VERSION="${TAG#v}"
-PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+# PUB_DATE + RELEASE_NOTES are injected by CI (from the GitHub release event);
+# local runs default to now / empty. Same task, same R2 API — no duplication.
+PUB_DATE="${PUB_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+NOTES="${RELEASE_NOTES:-}"
+VIEWER_DIR="$(pwd)/apps/viewer"
 shopt -s nullglob globstar
 uploaded=0
 
@@ -279,9 +283,9 @@ upload_bundle() {
   name=$(basename "$f")
   case "$f" in *.sig) ct="text/plain";; *) ct="application/octet-stream";; esac
   echo "R2 ← releases/${TAG}/${name}  (${ct})"
-  wrangler r2 object put "ifc-lite-bin/releases/${TAG}/${name}" --file "$f" --content-type "$ct"
+  (cd "$VIEWER_DIR" && wrangler r2 object put "ifc-lite-bin/releases/${TAG}/${name}" \
+    --file "$(realpath "$f")" --content-type "$ct")
   uploaded=$((uploaded+1))
-  # Write per-platform manifest for non-.sig bundles
   if [[ "$name" != *.sig ]]; then
     case "$name" in
       *aarch64-apple-darwin*) plat="darwin-aarch64";;
@@ -291,11 +295,13 @@ upload_bundle() {
       *)                      plat="";;
     esac
     if [ -n "$plat" ]; then
-      printf '{"version":"%s","pub_date":"%s","notes":"local dev build","filename":"%s"}\n' \
-        "$VERSION" "$PUB_DATE" "$name" > /tmp/ifc-lite-plat.json
+      printf '{"version":"%s","pub_date":"%s","notes":%s,"filename":"%s"}\n' \
+        "$VERSION" "$PUB_DATE" \
+        "$(printf '%s' "$NOTES" | jq -Rs .)" \
+        "$name" > /tmp/ifc-lite-plat.json
       echo "R2 ← releases/latest-${plat}.json  (${name})"
-      wrangler r2 object put "ifc-lite-bin/releases/latest-${plat}.json" \
-        --file /tmp/ifc-lite-plat.json --content-type "application/json"
+      (cd "$VIEWER_DIR" && wrangler r2 object put "ifc-lite-bin/releases/latest-${plat}.json" \
+        --file /tmp/ifc-lite-plat.json --content-type "application/json")
     fi
   fi
 }
@@ -311,7 +317,7 @@ for f in \
 done
 
 if [ "$uploaded" -eq 0 ]; then
-  echo "✗ no updater bundles found — run build:desktop-target with TAURI_SIGNING_PRIVATE_KEY set" >&2
+  echo "✗ no updater bundles — run build:desktop-target (with signing) first" >&2
   exit 1
 fi
 echo "✓ uploaded $uploaded file(s) to R2 under releases/${TAG}/"
@@ -343,66 +349,8 @@ fi
 pnpm --filter @ifc-lite/desktop exec tauri build --target "$TARGET" $EXTRA
 """
 
-[tasks."release:desktop-local"]
-description = "Push locally-built bundles to the REAL R2 bucket (via Cloudflare Workers API) so the local wrangler dev server can serve them. Same as release:desktop-r2 but intended for local iteration — use any TAG (e.g. TAG=v1.1.9-dev). Usage: TAG=v1.1.9-dev mise run release:desktop-local"
-shell = "bash -c"
-run = """
-TAG="${TAG:?usage: TAG=v1.1.9-dev mise run release:desktop-local}"
-VERSION="${TAG#v}"
-PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-# Runs from apps/viewer so wrangler picks up wrangler.jsonc (has the bucket binding).
-VIEWER_DIR="$(pwd)/apps/viewer"
-shopt -s nullglob globstar
-uploaded=0
-
-upload_bundle() {
-  local f="$1" name plat ct
-  name=$(basename "$f")
-  case "$f" in *.sig) ct="text/plain";; *) ct="application/octet-stream";; esac
-  echo "R2 ← releases/${TAG}/${name}"
-  (cd "$VIEWER_DIR" && wrangler r2 object put "ifc-lite-bin/releases/${TAG}/${name}" \
-    --file "$(realpath "$f")" --content-type "$ct")
-  uploaded=$((uploaded+1))
-  if [[ "$name" != *.sig ]]; then
-    case "$name" in
-      *aarch64-apple-darwin*) plat="darwin-aarch64";;
-      *x86_64-apple-darwin*)  plat="darwin-x86_64";;
-      *x86_64*linux*)         plat="linux-x86_64";;
-      *x86_64*windows*)       plat="windows-x86_64";;
-      *)                      plat="";;
-    esac
-    if [ -n "$plat" ]; then
-      printf '{"version":"%s","pub_date":"%s","notes":"local dev build","filename":"%s"}\n' \
-        "$VERSION" "$PUB_DATE" "$name" > /tmp/ifc-lite-plat-local.json
-      echo "R2 ← releases/latest-${plat}.json  (${name})"
-      (cd "$VIEWER_DIR" && wrangler r2 object put "ifc-lite-bin/releases/latest-${plat}.json" \
-        --file /tmp/ifc-lite-plat-local.json --content-type "application/json")
-    fi
-  fi
-}
-
-for f in \
-  target/**/release/bundle/macos/*.app.tar.gz \
-  target/**/release/bundle/macos/*.app.tar.gz.sig \
-  target/**/release/bundle/appimage/*.AppImage.tar.gz \
-  target/**/release/bundle/appimage/*.AppImage.tar.gz.sig \
-  target/**/release/bundle/msi/*.msi.zip \
-  target/**/release/bundle/msi/*.msi.zip.sig; do
-  upload_bundle "$f"
-done
-
-if [ "$uploaded" -eq 0 ]; then
-  echo "✗ no updater bundles — run build:desktop-local or build:desktop-target first" >&2
-  exit 1
-fi
-echo ""
-echo "✓ uploaded $uploaded file(s) to R2 under releases/${TAG}/"
-echo "  → now run: mise run dev:worker-local"
-echo "  → then:    mise run updater:check-local"
-"""
-
 [tasks."dev:worker-local"]
-description = "Run the CF viewer Worker locally (wrangler dev) — reads from local R2 simulation. Pair with release:desktop-local to serve local build artifacts."
+description = "Run the CF viewer Worker locally (wrangler dev). Pair with release:desktop-r2 (any TAG) to serve locally-built bundles via the local worker."
 dir = "apps/viewer"
 run = "wrangler dev"
 
