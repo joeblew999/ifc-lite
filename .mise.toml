@@ -102,13 +102,15 @@ ruby = "3"
 #            fnox:init, rust:build/test/wasm-pack, wrangler:dev/deploy, cf:d1-migrate
 # Bump the ref deliberately; do NOT use main (drift on every fetch).
 [task_config]
-includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.4.0"]
+includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.5.0"]
 
 [env]
 # pnpm is managed via corepack (bundled with node)
 # Which fnox secrets get pushed to this repo's GitHub Actions secrets by
 # `mise run secrets:sync-github` (the shared task auto-detects the repo).
 FNOX_SYNC_KEYS = "CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID,TAURI_SIGNING_PRIVATE_KEY,TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+# Used by the shared mobile:tauri-* tasks — points them at the pnpm workspace package.
+TAURI_CMD = "pnpm --filter @ifc-lite/desktop exec tauri"
 # packages/server-bin postinstall tries to fetch a pre-built binary from
 # louistrue/ifc-lite GitHub releases (wrong repo + unpublished version).
 # Skip it — the binary is built locally via `mise run build:server`.
@@ -484,35 +486,29 @@ pnpm store prune 2>/dev/null || true
 """
 
 # ---- Mobile (Android + iOS via Tauri) ----
-# Prerequisites: run `mise run mobile/android-setup` and/or `mise run mobile/ios-setup` once.
-# Those shared tasks install the native toolchains (Java, NDK, CocoaPods, Rust targets).
+# Toolchain setup: mise run mobile:android-setup  /  mise run mobile:ios-setup  (once per machine)
+# Tauri invocation uses TAURI_CMD set above — shared tasks pick it up automatically.
 
 [tasks."init:android"]
-description = "Initialise Tauri Android project (run once per clone, requires android-setup first)"
-run = "pnpm --filter @ifc-lite/desktop exec tauri android init"
-depends = ["wasm"]
+description = "Initialise Tauri Android project (run once per clone)"
+depends = ["wasm", "mobile:tauri-android-init"]
 
 [tasks."dev:android"]
 description = "Tauri Android dev — hot-reload on connected device or emulator"
-run = "pnpm --filter @ifc-lite/desktop exec tauri android dev"
-depends = ["wasm"]
+depends = ["wasm", "mobile:tauri-android-dev"]
 
 [tasks."build:android"]
 description = "Tauri Android release APK/AAB"
-run = "pnpm --filter @ifc-lite/desktop exec tauri android build"
-depends = ["wasm"]
+depends = ["wasm", "mobile:tauri-android-build"]
 
 [tasks."init:ios"]
-description = "Initialise Tauri iOS project (macOS only, run once per clone, requires ios-setup first)"
-run = "pnpm --filter @ifc-lite/desktop exec tauri ios init"
-depends = ["wasm"]
+description = "Initialise Tauri iOS project (macOS only, run once per clone)"
+depends = ["wasm", "mobile:tauri-ios-init"]
 
 [tasks."dev:ios"]
 description = "Tauri iOS dev — hot-reload on connected device or simulator (macOS only)"
-run = "pnpm --filter @ifc-lite/desktop exec tauri ios dev"
-depends = ["wasm"]
+depends = ["wasm", "mobile:tauri-ios-dev"]
 
 [tasks."build:ios"]
 description = "Tauri iOS release IPA (macOS only)"
-run = "pnpm --filter @ifc-lite/desktop exec tauri ios build"
-depends = ["wasm"]
+depends = ["wasm", "mobile:tauri-ios-build"]
