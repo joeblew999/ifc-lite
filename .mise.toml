@@ -264,14 +264,41 @@ esac
 """
 
 [tasks."release:desktop-r2"]
-description = "Push locally-built updater bundles to R2 and update releases/latest.json. Build with signing first (TAURI_SIGNING_PRIVATE_KEY is pulled from fnox automatically). Usage: TAG=v1.1.9 mise run release:desktop-r2"
+description = "Push locally-built updater bundles to R2 and write per-platform manifests. Build first with signing (auto-pulled from fnox). Usage: TAG=v1.1.9 mise run release:desktop-r2"
 shell = "bash -c"
 run = """
 TAG="${TAG:?usage: TAG=v1.1.9 mise run release:desktop-r2}"
 VERSION="${TAG#v}"
+PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 shopt -s nullglob globstar
 uploaded=0
-declare -A platform_files
+
+upload_bundle() {
+  local f="$1" name plat ct
+  name=$(basename "$f")
+  case "$f" in *.sig) ct="text/plain";; *) ct="application/octet-stream";; esac
+  echo "R2 ← releases/${TAG}/${name}  (${ct})"
+  wrangler r2 object put "ifc-lite-bin/releases/${TAG}/${name}" --file "$f" --content-type "$ct"
+  uploaded=$((uploaded+1))
+  # Write per-platform manifest for non-.sig bundles
+  if [[ "$name" != *.sig ]]; then
+    case "$name" in
+      *aarch64-apple-darwin*) plat="darwin-aarch64";;
+      *x86_64-apple-darwin*)  plat="darwin-x86_64";;
+      *x86_64*linux*)         plat="linux-x86_64";;
+      *x86_64*windows*)       plat="windows-x86_64";;
+      *)                      plat="";;
+    esac
+    if [ -n "$plat" ]; then
+      printf '{"version":"%s","pub_date":"%s","notes":"local dev build","filename":"%s"}\n' \
+        "$VERSION" "$PUB_DATE" "$name" > /tmp/ifc-lite-plat.json
+      echo "R2 ← releases/latest-${plat}.json  (${name})"
+      wrangler r2 object put "ifc-lite-bin/releases/latest-${plat}.json" \
+        --file /tmp/ifc-lite-plat.json --content-type "application/json"
+    fi
+  fi
+}
+
 for f in \
   target/**/release/bundle/macos/*.app.tar.gz \
   target/**/release/bundle/macos/*.app.tar.gz.sig \
@@ -279,45 +306,14 @@ for f in \
   target/**/release/bundle/appimage/*.AppImage.tar.gz.sig \
   target/**/release/bundle/msi/*.msi.zip \
   target/**/release/bundle/msi/*.msi.zip.sig; do
-  name=$(basename "$f")
-  key="releases/${TAG}/${name}"
-  case "$f" in *.sig) ct="text/plain";; *) ct="application/octet-stream";; esac
-  echo "R2 ← ${key}  (${ct})"
-  wrangler r2 object put "ifc-lite-bin/${key}" --file "$f" --content-type "$ct"
-  uploaded=$((uploaded+1))
-  # Track platform→filename for latest.json (only the non-.sig bundles)
-  case "$name" in
-    *.sig) ;;
-    *aarch64-apple-darwin*) platform_files["darwin-aarch64"]="$name";;
-    *x86_64-apple-darwin*)  platform_files["darwin-x86_64"]="$name";;
-    *x86_64*linux*)         platform_files["linux-x86_64"]="$name";;
-    *x86_64*windows*)       platform_files["windows-x86_64"]="$name";;
-  esac
+  upload_bundle "$f"
 done
+
 if [ "$uploaded" -eq 0 ]; then
   echo "✗ no updater bundles found — run build:desktop-target with TAURI_SIGNING_PRIVATE_KEY set" >&2
   exit 1
 fi
-# Write releases/latest.json so the Worker serves this version immediately
-# without needing a GitHub release (enables fast local test cycles).
-PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-PLATFORMS_JSON=$(
-  for plat in "${!platform_files[@]}"; do
-    echo "\"${plat}\": \"${platform_files[$plat]}\""
-  done | paste -sd, -
-)
-cat > /tmp/ifc-lite-latest.json <<MANIFEST
-{
-  "version": "${VERSION}",
-  "pub_date": "${PUB_DATE}",
-  "notes": "local dev build",
-  "platforms": { ${PLATFORMS_JSON} }
-}
-MANIFEST
-echo "R2 ← releases/latest.json"
-cat /tmp/ifc-lite-latest.json
-wrangler r2 object put "ifc-lite-bin/releases/latest.json" --file /tmp/ifc-lite-latest.json --content-type "application/json"
-echo "✓ uploaded $uploaded bundle file(s) + latest.json for ${TAG}"
+echo "✓ uploaded $uploaded file(s) to R2 under releases/${TAG}/"
 """
 
 [tasks."build:server"]

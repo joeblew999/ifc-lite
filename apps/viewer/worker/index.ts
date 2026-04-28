@@ -217,16 +217,15 @@ interface ReleaseAsset {
   browser_download_url: string;
 }
 
-// Manifest written to R2 at releases/latest.json by CI (and by
-// release:desktop-r2 for local dev builds). Lets the Worker return a new
-// version WITHOUT needing a GitHub release — key for fast local iteration.
-interface R2LatestManifest {
+// Per-platform manifest at releases/latest-<platform>.json in R2.
+// Each CI matrix job writes exactly one file for its own platform — no races.
+// Local release:desktop-r2 writes one file per platform it built.
+// platform key = darwin-aarch64 | darwin-x86_64 | linux-x86_64 | windows-x86_64
+interface R2PlatformManifest {
   version: string;
   pub_date: string;
   notes: string;
-  // Maps platform key (darwin-aarch64, linux-x86_64, windows-x86_64) to
-  // the updater bundle filename (without path — the Worker prepends the tag).
-  platforms: Record<string, string>;
+  filename: string; // exact bundle filename, e.g. IFC-Lite-Viewer-aarch64-apple-darwin.app.tar.gz
 }
 
 async function handleReleasesDownload(pathname: string, env: Env): Promise<Response> {
@@ -255,28 +254,25 @@ async function handleUpdater(request: Request, pathname: string, env: Env): Prom
   const base = new URL(request.url);
 
   // ── R2-first path ──────────────────────────────────────────────────────────
-  // CI and `mise run release:desktop-r2` both write releases/latest.json.
-  // When present it lets us serve an update without a GitHub release, which
-  // makes local dev iteration fast: build → push R2 → install old → auto-update.
-  const latestObj = await env.RELEASES.get('releases/latest.json');
+  // Each CI matrix job (and release:desktop-r2 locally) writes a per-platform
+  // manifest at releases/latest-<platform>.json with the exact filename.
+  // No cross-job races — each job owns exactly one file.
+  const latestObj = await env.RELEASES.get(`releases/latest-${platform}.json`);
   if (latestObj) {
-    const manifest = await latestObj.json<R2LatestManifest>();
+    const manifest = await latestObj.json<R2PlatformManifest>();
     const latestVersion = manifest.version.replace(/^v/, '').replace(/-.*$/, '');
 
     if (compareSemver(latestVersion, current) > 0) {
-      const filename = manifest.platforms[platform];
-      if (filename) {
-        const tag = `v${manifest.version}`;
-        const sigObj = await env.RELEASES.get(`releases/${tag}/${filename}.sig`);
-        if (sigObj) {
-          return Response.json({
-            version: manifest.version,
-            pub_date: manifest.pub_date,
-            notes: manifest.notes,
-            url: `${base.origin}/api/releases/${tag}/${filename}`,
-            signature: await sigObj.text(),
-          });
-        }
+      const tag = `v${manifest.version}`;
+      const sigObj = await env.RELEASES.get(`releases/${tag}/${manifest.filename}.sig`);
+      if (sigObj) {
+        return Response.json({
+          version: manifest.version,
+          pub_date: manifest.pub_date,
+          notes: manifest.notes,
+          url: `${base.origin}/api/releases/${tag}/${manifest.filename}`,
+          signature: await sigObj.text(),
+        });
       }
     } else {
       return new Response(null, { status: 204 }); // R2 says we're up to date
