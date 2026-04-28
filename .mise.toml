@@ -103,7 +103,7 @@ includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.2
 # pnpm is managed via corepack (bundled with node)
 # Which fnox secrets get pushed to this repo's GitHub Actions secrets by
 # `mise run secrets:sync-github` (the shared task auto-detects the repo).
-FNOX_SYNC_KEYS = "CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID,TAURI_SIGNING_PRIVATE_KEY"
+FNOX_SYNC_KEYS = "CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID,TAURI_SIGNING_PRIVATE_KEY,TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
 
 [tasks.install]
 description = "Install JS dependencies (with safety nuke if a foreign package manager left artifacts)"
@@ -198,13 +198,14 @@ case "$TARGET" in
     EXTRA="--config src-tauri/tauri.macos-adhoc.json"
     ;;
 esac
-# Pull signing key from fnox (macOS keychain) if not already in the environment.
-# This makes local builds produce the same signed updater artifacts as CI.
-# fnox is installed by mise (github:jdx/fnox). If it fails (key not in keychain),
-# we fall through to the no-updater path so dev builds still succeed.
+# Load signing credentials from fnox (macOS keychain) if not already in env.
+# TAURI_SIGNING_PRIVATE_KEY_PASSWORD must be set explicitly (even to "") because
+# the key is rsign-encrypted — without it Tauri tries to prompt interactively
+# and fails in non-TTY contexts (ENXIO / "Device not configured").
 if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
   if KEY=$(fnox get TAURI_SIGNING_PRIVATE_KEY 2>/dev/null) && [ -n "$KEY" ]; then
     export TAURI_SIGNING_PRIVATE_KEY="$KEY"
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-$(fnox get TAURI_SIGNING_PRIVATE_KEY_PASSWORD 2>/dev/null || true)}"
     echo "✓ TAURI_SIGNING_PRIVATE_KEY loaded from fnox keychain"
   else
     echo "⚠ TAURI_SIGNING_PRIVATE_KEY not in fnox keychain — building without updater artifacts"
@@ -331,6 +332,7 @@ esac
 if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
   if KEY=$(fnox get TAURI_SIGNING_PRIVATE_KEY 2>/dev/null) && [ -n "$KEY" ]; then
     export TAURI_SIGNING_PRIVATE_KEY="$KEY"
+    export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-$(fnox get TAURI_SIGNING_PRIVATE_KEY_PASSWORD 2>/dev/null || true)}"
     echo "✓ TAURI_SIGNING_PRIVATE_KEY loaded from fnox keychain"
   else
     echo "⚠ TAURI_SIGNING_PRIVATE_KEY not in fnox — building without updater signing"
