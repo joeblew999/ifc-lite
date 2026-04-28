@@ -7,3 +7,9 @@ auto_stop = []
 run = "./target/release/ifc-lite-server"
 auto_start = []
 auto_stop = []
+
+[daemons.worker-local]
+run = "mise exec npm:wrangler@4.84.1 -- wrangler dev"
+dir = "apps/viewer"
+auto_start = []
+auto_stop = []

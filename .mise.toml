@@ -350,9 +350,8 @@ pnpm --filter @ifc-lite/desktop exec tauri build --target "$TARGET" $EXTRA
 """
 
 [tasks."dev:worker-local"]
-description = "Run the CF viewer Worker locally (wrangler dev). Pair with release:desktop-r2 (any TAG) to serve locally-built bundles via the local worker."
-dir = "apps/viewer"
-run = "wrangler dev"
+description = "Start the local CF Worker (wrangler dev) under pitchfork. Pair with release:desktop-r2 to serve locally-built bundles. Logs: pitchfork logs worker-local"
+run = "pitchfork start worker-local"
 
 [tasks."updater:check-local"]
 description = "Check the local wrangler dev updater endpoint (http://localhost:8787). Run dev:worker-local first. Usage: VERSION=1.1.9 mise run updater:check-local"
