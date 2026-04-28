@@ -96,11 +96,33 @@ ruby = "3"
 "aqua:a8m/envsubst" = "1"
 # usage-cli: powers #USAGE tab-completion + --help on mise tasks (by jdx, same author as mise).
 "cargo:usage-cli" = "3"
+# utm-dev: VM orchestration for Windows/Linux cross-platform Tauri builds on Apple Silicon.
+# Not yet on crates.io — install manually: cargo install --git https://github.com/joeblew999/utm-dev-cli.git
+# "cargo:utm-dev" = "0.1"
 
 # Pull shared secrets/fnox/build tasks from joeblew999/.github
 # Available: secrets:status, secrets:sync-github(-dry), secrets:migrate-to-keychain,
 #            fnox:init, rust:build/test/wasm-pack, wrangler:dev/deploy, cf:d1-migrate
 # Bump the ref deliberately; do NOT use main (drift on every fetch).
+# Tools that are local-dev-only. CI workflows pass --no-optional to skip
+# these, avoiding unnecessary compile time and the cargo:usage-cli /
+# cargo:wasm-pack rustup race that caused "could not rename downloaded file".
+# `mise install` (no flags) on a dev machine installs everything as usual.
+[tool_options."cargo:usage-cli"]
+optional = true
+[tool_options.bun]
+optional = true
+[tool_options.java]
+optional = true
+[tool_options.ruby]
+optional = true
+[tool_options."github:jdx/fnox"]
+optional = true
+[tool_options."aqua:cli/cli"]
+optional = true
+[tool_options."github:endevco/pitchfork"]
+optional = true
+
 [task_config]
 includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.5.0"]
 
