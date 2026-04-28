@@ -2644,7 +2644,7 @@ dependencies = [
 
 [[package]]
 name = "ifc-lite-desktop"
-version = "1.1.7"
+version = "1.1.9"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4627,9 +4627,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
- "futures-channel",
  "futures-core",
- "futures-util",
  "h2",
  "http",
  "http-body",

@@ -28,6 +28,9 @@ packages/wasm/test-parser.js
 
 # Cache directories
 **/.cache/
+
+# Wrangler local dev state (miniflare SQLite, DO storage)
+**/.wrangler/state/
 .cache/
 
 # Temporary output files

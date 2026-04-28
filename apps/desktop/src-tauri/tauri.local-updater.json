@@ -1,0 +1,9 @@
+{
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "http://localhost:8787/api/updater/{{target}}/{{arch}}/{{current_version}}"
+      ]
+    }
+  }
+}
