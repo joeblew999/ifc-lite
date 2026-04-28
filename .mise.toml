@@ -47,10 +47,10 @@
 #                                  production bundles regardless of .env.local.
 #
 # ─── Process supervisor ────────────────────────────────────────────────────────
-#   pitchfork.toml declares the daemons used by `dev:all`. Inspect with:
+#   pitchfork.toml declares the daemons. Inspect with:
 #     pitchfork list
-#     pitchfork logs viewer
-#     pitchfork stop viewer server
+#     pitchfork logs viewer | pitchfork logs worker-local
+#     pitchfork stop viewer server worker-local
 #
 # =============================================================================
 
@@ -106,6 +106,10 @@ includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.4
 # Which fnox secrets get pushed to this repo's GitHub Actions secrets by
 # `mise run secrets:sync-github` (the shared task auto-detects the repo).
 FNOX_SYNC_KEYS = "CLOUDFLARE_API_TOKEN,CLOUDFLARE_ACCOUNT_ID,TAURI_SIGNING_PRIVATE_KEY,TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+# packages/server-bin postinstall tries to fetch a pre-built binary from
+# louistrue/ifc-lite GitHub releases (wrong repo + unpublished version).
+# Skip it — the binary is built locally via `mise run build:server`.
+IFC_LITE_SKIP_DOWNLOAD = "1"
 
 [tasks.install]
 description = "Install JS dependencies (with safety nuke if a foreign package manager left artifacts)"
@@ -465,8 +469,8 @@ pitchfork list
 echo
 echo "Viewer:  http://localhost:3000"
 echo "Server:  http://localhost:8080"
-echo "Logs:    pitchfork logs viewer | pitchfork logs server"
-echo "Stop:    pitchfork stop viewer server"
+echo "Logs:    pitchfork logs viewer | pitchfork logs server | pitchfork logs worker-local"
+echo "Stop:    pitchfork stop viewer server worker-local"
 """
 
 [tasks.clean]
