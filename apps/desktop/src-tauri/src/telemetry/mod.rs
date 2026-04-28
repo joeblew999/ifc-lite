@@ -10,8 +10,10 @@ use tauri_plugin_log::{fern, Target, TargetKind};
 use tokio::sync::mpsc;
 use tokio::time::interval;
 
-const INGEST_URL: &str =
-    "https://ifc-lite-viewer.gedw99.workers.dev/api/v0/events";
+const INGEST_URL: &str = match option_env!("INGEST_URL") {
+    Some(url) => url,
+    None => "https://ifc-lite-viewer.gedw99.workers.dev/api/v0/events",
+};
 
 const BATCH_SECS: u64 = 3;
 const BATCH_MAX: usize = 25;

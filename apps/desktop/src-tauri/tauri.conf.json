@@ -60,7 +60,7 @@
       "endpoints": [
         "https://ifc-lite-viewer.gedw99.workers.dev/api/updater/{{target}}/{{arch}}/{{current_version}}"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg0Q0NFODRDQzFBMzlCNjkKUldScG02UEJUT2pNaEtVYytram9FVEtqdHZLVlJ0b3cvOVBwSVNmOGZIb0FpcytrU3RFM09QeWIK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERBRjA3OUUxQzk1QzRGMEEKUldRS1Qxeko0WG53MnNpTGEzU3FUM1AwVzc4UG5TOUM1UHNmd21hdDlBQ1VubDJ2VDI5SXVqU1IK"
     }
   }
 }
