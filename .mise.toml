@@ -91,6 +91,8 @@ bun = "1.3"
 # not found' on Linux runners that don't have them preinstalled.
 "aqua:jqlang/jq" = "1"
 "aqua:a8m/envsubst" = "1"
+# usage-cli: powers #USAGE tab-completion + --help on mise tasks (by jdx, same author as mise).
+"cargo:usage-cli" = "3"
 
 # Pull shared secrets/fnox/build tasks from joeblew999/.github
 # Available: secrets:status, secrets:sync-github(-dry), secrets:migrate-to-keychain,
