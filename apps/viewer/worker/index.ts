@@ -217,6 +217,18 @@ interface ReleaseAsset {
   browser_download_url: string;
 }
 
+// Manifest written to R2 at releases/latest.json by CI (and by
+// release:desktop-r2 for local dev builds). Lets the Worker return a new
+// version WITHOUT needing a GitHub release — key for fast local iteration.
+interface R2LatestManifest {
+  version: string;
+  pub_date: string;
+  notes: string;
+  // Maps platform key (darwin-aarch64, linux-x86_64, windows-x86_64) to
+  // the updater bundle filename (without path — the Worker prepends the tag).
+  platforms: Record<string, string>;
+}
+
 async function handleReleasesDownload(pathname: string, env: Env): Promise<Response> {
   // pathname = /api/releases/<tag>/<filename>
   // Strips the /api/releases/ prefix to get the R2 key: releases/<tag>/<filename>
@@ -228,7 +240,6 @@ async function handleReleasesDownload(pathname: string, env: Env): Promise<Respo
   headers.set('content-type', obj.httpMetadata?.contentType ?? 'application/octet-stream');
   if (obj.size) headers.set('content-length', String(obj.size));
   headers.set('etag', obj.httpEtag);
-  // Allow the desktop app (different origin) to download directly.
   headers.set('access-control-allow-origin', '*');
   return new Response(obj.body, { headers });
 }
@@ -239,42 +250,64 @@ async function handleUpdater(request: Request, pathname: string, env: Env): Prom
   if (parts.length < 3) return new Response('bad request', { status: 400 });
   const [target, arch, currentVersion] = parts;
 
-  // Fetch latest release from GitHub to get the version + asset list.
+  const platform = `${target}-${arch}`; // e.g. darwin-aarch64, linux-x86_64
+  const current = currentVersion.replace(/^v/, '').replace(/-.*$/, '');
+  const base = new URL(request.url);
+
+  // ── R2-first path ──────────────────────────────────────────────────────────
+  // CI and `mise run release:desktop-r2` both write releases/latest.json.
+  // When present it lets us serve an update without a GitHub release, which
+  // makes local dev iteration fast: build → push R2 → install old → auto-update.
+  const latestObj = await env.RELEASES.get('releases/latest.json');
+  if (latestObj) {
+    const manifest = await latestObj.json<R2LatestManifest>();
+    const latestVersion = manifest.version.replace(/^v/, '').replace(/-.*$/, '');
+
+    if (compareSemver(latestVersion, current) > 0) {
+      const filename = manifest.platforms[platform];
+      if (filename) {
+        const tag = `v${manifest.version}`;
+        const sigObj = await env.RELEASES.get(`releases/${tag}/${filename}.sig`);
+        if (sigObj) {
+          return Response.json({
+            version: manifest.version,
+            pub_date: manifest.pub_date,
+            notes: manifest.notes,
+            url: `${base.origin}/api/releases/${tag}/${filename}`,
+            signature: await sigObj.text(),
+          });
+        }
+      }
+    } else {
+      return new Response(null, { status: 204 }); // R2 says we're up to date
+    }
+  }
+
+  // ── GitHub fallback ────────────────────────────────────────────────────────
+  // Used when releases/latest.json doesn't exist or the .sig is missing in R2.
   const ghResp = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, {
     headers: { 'user-agent': 'ifc-lite-updater', 'accept': 'application/vnd.github+json' },
   });
   if (!ghResp.ok) return new Response('upstream error', { status: 502 });
   const release = await ghResp.json() as { tag_name: string; assets: ReleaseAsset[]; published_at: string; body?: string };
 
-  // Strip leading 'v' and any '-suffix' for semver compare.
   const latestVersion = release.tag_name.replace(/^v/, '').replace(/-.*$/, '');
-  const current = currentVersion.replace(/^v/, '').replace(/-.*$/, '');
   if (compareSemver(latestVersion, current) <= 0) {
-    return new Response(null, { status: 204 }); // no update
+    return new Response(null, { status: 204 });
   }
 
-  // Map Tauri's <target>/<arch> to the bundle filename suffix we ship.
-  const platform = `${target}-${arch}`; // e.g. darwin-aarch64, linux-x86_64, windows-x86_64
   const wanted = pickAssetForPlatform(release.assets, platform);
   if (!wanted) return new Response(null, { status: 204 });
 
-  // Prefer R2 for the .sig file (no GitHub CDN hop) and build an R2-backed
-  // download URL. Fall back to GitHub CDN if the R2 object isn't there yet
-  // (e.g. first release before CI has uploaded, or CI failure mid-run).
+  // Use R2 for the .sig if available (avoids GitHub CDN hop).
   const r2SigKey = `releases/${release.tag_name}/${wanted.name}.sig`;
   const sigObj = await env.RELEASES.get(r2SigKey);
-
   let signature: string;
   let downloadUrl: string;
-
   if (sigObj) {
-    // R2 has the bundle — use the Worker-proxied R2 URL so the desktop app
-    // downloads via our edge rather than GitHub CDN.
     signature = await sigObj.text();
-    const base = new URL(request.url);
     downloadUrl = `${base.origin}/api/releases/${release.tag_name}/${wanted.name}`;
   } else {
-    // R2 not yet populated — fall back to GitHub CDN URLs.
     const sigAsset = release.assets.find((a) => a.name === `${wanted.name}.sig`);
     signature = sigAsset
       ? await fetch(sigAsset.browser_download_url).then((r) => (r.ok ? r.text() : ''))

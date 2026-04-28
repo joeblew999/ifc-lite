@@ -247,7 +247,38 @@ jobs:
             esac
             echo "R2 ← ${key}  (${ct})"
             wrangler r2 object put "ifc-lite-bin/${key}" --file "$f" --content-type "$ct"
+            # Track platform→filename for latest.json (non-.sig bundles only)
+            if [[ "$f" != *.sig ]]; then
+              case "$name" in
+                *aarch64-apple-darwin*) PLAT_darwin_aarch64="$name";;
+                *x86_64-apple-darwin*)  PLAT_darwin_x86_64="$name";;
+                *x86_64*linux*)         PLAT_linux_x86_64="$name";;
+                *x86_64*windows*)       PLAT_windows_x86_64="$name";;
+              esac
+            fi
           done
+          # Write releases/latest.json so the Worker can serve this version
+          # immediately without a GitHub API call (fast updater path + dev cycle).
+          # This runs once per platform matrix job; the last writer wins, which is
+          # fine because all platforms share the same version string.
+          PUB_DATE="${{ github.event.release.published_at }}"
+          VERSION="${TAG#v}"
+          cat > /tmp/latest.json <<MANIFEST
+          {
+            "version": "${VERSION}",
+            "pub_date": "${PUB_DATE}",
+            "notes": $(echo '${{ github.event.release.body }}' | head -c 500 | jq -Rs .),
+            "platforms": {
+              "darwin-aarch64":  "${PLAT_darwin_aarch64:-}",
+              "darwin-x86_64":   "${PLAT_darwin_x86_64:-}",
+              "linux-x86_64":    "${PLAT_linux_x86_64:-}",
+              "windows-x86_64":  "${PLAT_windows_x86_64:-}"
+            }
+          }
+          MANIFEST
+          echo "R2 ← releases/latest.json"
+          cat /tmp/latest.json
+          wrangler r2 object put "ifc-lite-bin/releases/latest.json" --file /tmp/latest.json --content-type "application/json"
 
       # For non-release runs, save artifacts so PRs can be downloaded.
       - name: Upload bundles (PR / push)

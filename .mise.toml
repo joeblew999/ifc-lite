@@ -184,7 +184,7 @@ run = "pnpm --filter @ifc-lite/desktop exec tauri build"
 depends = ["wasm"]
 
 [tasks."build:desktop-target"]
-description = "Tauri build for an explicit Rust triple, with macOS ad-hoc sign baked in. Usage: TARGET=aarch64-apple-darwin mise run build:desktop-target"
+description = "Tauri build for an explicit Rust triple. Pulls TAURI_SIGNING_PRIVATE_KEY from fnox (macOS keychain) if not set — same signed output as CI. Usage: TARGET=aarch64-apple-darwin mise run build:desktop-target"
 depends = ["wasm"]
 shell = "bash -c"   # Windows otherwise interprets the script via cmd.exe and chokes on '#' comments.
 run = """
@@ -198,12 +198,19 @@ case "$TARGET" in
     EXTRA="--config src-tauri/tauri.macos-adhoc.json"
     ;;
 esac
-# Updater payloads (.app.tar.gz / .AppImage.tar.gz / .msi.zip + .sig) need
-# TAURI_SIGNING_PRIVATE_KEY. If unset (typical local dev), layer in an
-# override that disables createUpdaterArtifacts so the build still succeeds.
-# CI sets the secret, so it produces the signed updater artifacts.
+# Pull signing key from fnox (macOS keychain) if not already in the environment.
+# This makes local builds produce the same signed updater artifacts as CI.
+# fnox is installed by mise (github:jdx/fnox). If it fails (key not in keychain),
+# we fall through to the no-updater path so dev builds still succeed.
 if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-  EXTRA="$EXTRA --config src-tauri/tauri.no-updater.json"
+  if KEY=$(fnox get TAURI_SIGNING_PRIVATE_KEY 2>/dev/null) && [ -n "$KEY" ]; then
+    export TAURI_SIGNING_PRIVATE_KEY="$KEY"
+    echo "✓ TAURI_SIGNING_PRIVATE_KEY loaded from fnox keychain"
+  else
+    echo "⚠ TAURI_SIGNING_PRIVATE_KEY not in fnox keychain — building without updater artifacts"
+    echo "  To enable signing: fnox set TAURI_SIGNING_PRIVATE_KEY (paste the key)"
+    EXTRA="$EXTRA --config src-tauri/tauri.no-updater.json"
+  fi
 fi
 pnpm --filter @ifc-lite/desktop exec tauri build --target "$TARGET" $EXTRA
 """
@@ -257,12 +264,14 @@ esac
 """
 
 [tasks."release:desktop-r2"]
-description = "Push locally-built updater bundles to R2 ifc-lite-bin/releases/<TAG>/. Run build:desktop-target first (with TAURI_SIGNING_PRIVATE_KEY set). Usage: TAG=v1.1.9 mise run release:desktop-r2"
+description = "Push locally-built updater bundles to R2 and update releases/latest.json. Build with signing first (TAURI_SIGNING_PRIVATE_KEY is pulled from fnox automatically). Usage: TAG=v1.1.9 mise run release:desktop-r2"
 shell = "bash -c"
 run = """
 TAG="${TAG:?usage: TAG=v1.1.9 mise run release:desktop-r2}"
+VERSION="${TAG#v}"
 shopt -s nullglob globstar
 uploaded=0
+declare -A platform_files
 for f in \
   target/**/release/bundle/macos/*.app.tar.gz \
   target/**/release/bundle/macos/*.app.tar.gz.sig \
@@ -276,12 +285,39 @@ for f in \
   echo "R2 ← ${key}  (${ct})"
   wrangler r2 object put "ifc-lite-bin/${key}" --file "$f" --content-type "$ct"
   uploaded=$((uploaded+1))
+  # Track platform→filename for latest.json (only the non-.sig bundles)
+  case "$name" in
+    *.sig) ;;
+    *aarch64-apple-darwin*) platform_files["darwin-aarch64"]="$name";;
+    *x86_64-apple-darwin*)  platform_files["darwin-x86_64"]="$name";;
+    *x86_64*linux*)         platform_files["linux-x86_64"]="$name";;
+    *x86_64*windows*)       platform_files["windows-x86_64"]="$name";;
+  esac
 done
 if [ "$uploaded" -eq 0 ]; then
-  echo "✗ no updater bundles found — run 'TAURI_SIGNING_PRIVATE_KEY=... TARGET=<triple> mise run build:desktop-target' first" >&2
+  echo "✗ no updater bundles found — run build:desktop-target with TAURI_SIGNING_PRIVATE_KEY set" >&2
   exit 1
 fi
-echo "✓ uploaded $uploaded file(s) to R2 under releases/${TAG}/"
+# Write releases/latest.json so the Worker serves this version immediately
+# without needing a GitHub release (enables fast local test cycles).
+PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+PLATFORMS_JSON=$(
+  for plat in "${!platform_files[@]}"; do
+    echo "\"${plat}\": \"${platform_files[$plat]}\""
+  done | paste -sd, -
+)
+cat > /tmp/ifc-lite-latest.json <<MANIFEST
+{
+  "version": "${VERSION}",
+  "pub_date": "${PUB_DATE}",
+  "notes": "local dev build",
+  "platforms": { ${PLATFORMS_JSON} }
+}
+MANIFEST
+echo "R2 ← releases/latest.json"
+cat /tmp/ifc-lite-latest.json
+wrangler r2 object put "ifc-lite-bin/releases/latest.json" --file /tmp/ifc-lite-latest.json --content-type "application/json"
+echo "✓ uploaded $uploaded bundle file(s) + latest.json for ${TAG}"
 """
 
 [tasks."build:server"]
