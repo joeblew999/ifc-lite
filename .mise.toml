@@ -68,34 +68,34 @@ rust = "nightly-2025-11-15"
 # pitchfork moved jdx → endevco/pitchfork in 2026; mise's default
 # 'pitchfork' alias still points at jdx, so use the github backend
 # explicitly to track the active fork.
-"github:endevco/pitchfork" = "2.7"
+"github:endevco/pitchfork" = {version = "2.7", optional = true}
 # Cloudflare CLI for deploy:web / deploy:embed.
 # 4.85.0 has a 'Could not route 7003' regression on `wrangler deploy
 # --env <name>`. Pin to known-good until upstream fixes.
 "npm:wrangler" = "4.84.1"
 # Bun: kept available for experiments (was tried for build:cli-bin, see
 # note below the build:cli task). Not used by any task currently.
-bun = "1.3"
+bun = {version = "1.3", optional = true}
 # Mobile builds: Java for Android, Ruby for iOS CocoaPods.
-java = "temurin-17"
-ruby = "3"
+java = {version = "temurin-17", optional = true}
+ruby = {version = "3", optional = true}
 # fnox: secrets manager by jdx (same author as mise). All secrets are
 # stored in the macOS Keychain (service=fnox) via fnox's `keychain`
 # provider. ~/.config/fnox/config.toml maps secret names to keychain
 # entries — no encrypted blobs in the file. CI doesn't run fnox; it
 # reads secrets injected as env vars from GitHub Actions repo secrets,
 # pushed there by `mise run secrets:sync-github` from a dev machine.
-"github:jdx/fnox" = "1.23"
+"github:jdx/fnox" = {version = "1.23", optional = true}
 # GitHub CLI: used by the shared secrets:sync-github + secrets:status tasks.
 # Pinning here keeps mise as the SSOT for tools.
-"aqua:cli/cli" = "2"
+"aqua:cli/cli" = {version = "2", optional = true}
 # Script dependencies (used by scripts that touch the CF API or sync
 # secrets). Without these in mise, fresh devs hit cryptic 'command
 # not found' on Linux runners that don't have them preinstalled.
 "aqua:jqlang/jq" = "1"
 "aqua:a8m/envsubst" = "1"
 # usage-cli: powers #USAGE tab-completion + --help on mise tasks (by jdx, same author as mise).
-"cargo:usage-cli" = "3"
+"cargo:usage-cli" = {version = "3", optional = true}
 # utm-dev: VM orchestration for Windows/Linux cross-platform Tauri builds on Apple Silicon.
 # Not yet on crates.io — install manually: cargo install --git https://github.com/joeblew999/utm-dev-cli.git
 # "cargo:utm-dev" = "0.1"
@@ -104,25 +104,6 @@ ruby = "3"
 # Available: secrets:status, secrets:sync-github(-dry), secrets:migrate-to-keychain,
 #            fnox:init, rust:build/test/wasm-pack, wrangler:dev/deploy, cf:d1-migrate
 # Bump the ref deliberately; do NOT use main (drift on every fetch).
-# Tools that are local-dev-only. CI workflows pass --no-optional to skip
-# these, avoiding unnecessary compile time and the cargo:usage-cli /
-# cargo:wasm-pack rustup race that caused "could not rename downloaded file".
-# `mise install` (no flags) on a dev machine installs everything as usual.
-[tool_options."cargo:usage-cli"]
-optional = true
-[tool_options.bun]
-optional = true
-[tool_options.java]
-optional = true
-[tool_options.ruby]
-optional = true
-[tool_options."github:jdx/fnox"]
-optional = true
-[tool_options."aqua:cli/cli"]
-optional = true
-[tool_options."github:endevco/pitchfork"]
-optional = true
-
 [task_config]
 includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.5.0"]
 

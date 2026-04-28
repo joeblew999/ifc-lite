@@ -86,7 +86,6 @@ jobs:
         with:
           install: true
           cache: true
-          install_args: --no-optional
         env:
           MISE_JOBS: "1"
 
